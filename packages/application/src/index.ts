@@ -10,7 +10,8 @@ import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
 import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
 import { FileStore, type RunRecord, type Store } from "@dnafix/persistence";
 import { ProjectDNAAdapter, RepositoryIntelligenceError, type RepositoryIntelligence } from "@dnafix/repository-intelligence";
-import { checksPassed, compareImpact, runChecks } from "@dnafix/verification";
+import { checksPassed, compareImpact, discoverChecks, runChecks } from "@dnafix/verification";
+import { codeBuildProviderFromEnv, type RemoteExecutionProvider } from "@dnafix/remote-execution";
 import { CodingAgent, VerificationAgent, readScopedFiles } from "@dnafix/agent-orchestrator";
 
 export interface PipelineDeps {
@@ -20,6 +21,8 @@ export interface PipelineDeps {
   model: ModelProvider;
   /** Sub-agent model for coding + verification work (Muse Spark by default). Defaults to `model`. */
   subAgentModel?: ModelProvider;
+  /** Cloud execution provider for verification (CodeBuild when DNAFIX_EXECUTION_PROVIDER=codebuild). Null = local runner. Never a silent fallback. */
+  remoteExecution?: RemoteExecutionProvider | null;
   worktrees: GitWorktreeManager;
   runner: CommandRunner;
   github: GitHubAdapter;
@@ -41,6 +44,7 @@ export function createDefaultDeps(overrides: Partial<PipelineDeps> = {}): Pipeli
     worktrees: new GitWorktreeManager(path.join(dataRoot, "worktrees")),
     runner,
     github: new GitHubAdapter(),
+    remoteExecution: process.env.DNAFIX_EXECUTION_PROVIDER === "codebuild" ? codeBuildProviderFromEnv() : null,
     dataRoot,
     maxRepairAttempts: Number(process.env.MAX_REPAIR_ATTEMPTS ?? 2),
     sandboxNote: runner.mode === "docker" ? "docker" : "host (reduced isolation — explicit SANDBOX_MODE=host)",
@@ -148,8 +152,73 @@ export class Pipeline {
     }
   }
 
+  /**
+   * Verification checks via the configured execution path.
+   * Cloud mode: the worktree is bundled and the approved discovered commands run
+   * on CodeBuild; per-command exit codes come from CloudWatch log markers.
+   * AWS failures are rethrown as RemoteExecutionError (pipeline marks BLOCKED) —
+   * there is no silent fallback to local execution.
+   */
+  private async runVerificationChecks(run: RunRecord, worktreePath: string, phase: "baseline" | "final", baselineFailingIds?: Set<string>): Promise<import("@dnafix/contracts").VerificationCheck[]> {
+    const remote = this.deps.remoteExecution;
+    if (!remote) return runChecks(this.deps.runner, worktreePath, { baselineFailingIds });
+    if (!remote.configured()) {
+      throw Object.assign(new Error("DNAFIX_EXECUTION_PROVIDER=codebuild but the CodeBuild provider is not configured (AWS_CODEBUILD_PROJECT/AWS_ARTIFACT_BUCKET). Refusing local fallback."), { name: "RemoteExecutionError" });
+    }
+    const discovered = await discoverChecks(worktreePath);
+    if (discovered.length === 0) return runChecks(this.deps.runner, worktreePath, { baselineFailingIds });
+    let result;
+    try {
+      result = await remote.runJob({
+        runId: `${run.id}-${phase}`,
+        workspacePath: worktreePath,
+        baseCommitSha: run.baseCommitSha!,
+        commands: discovered.map((c) => ({ id: c.kind, kind: c.kind, argv: c.argv })),
+        timeoutMinutes: 20,
+      });
+    } catch (err) {
+      throw Object.assign(new Error(`AWS execution failed (${phase}): ${err instanceof Error ? err.message : String(err)}`), { name: "RemoteExecutionError" });
+    }
+    run.remoteExecutions = [
+      ...(run.remoteExecutions ?? []),
+      {
+        phase,
+        provider: result.provider,
+        buildId: result.jobId,
+        status: result.status,
+        sourceKey: result.sourceKey,
+        sourceSha256: result.sourceSha256,
+        artifactsLocation: result.artifactsLocation,
+        logsReference: result.logsReference,
+        summary: result.summary,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    await this.runs.audit(run.id, run.repositoryId, "system", `execution.codebuild.${phase}`, result.status === "SUCCEEDED" ? "ok" : "error", `build=${result.jobId} status=${result.status} sourceSha256=${result.sourceSha256} logs=${result.logsReference}`);
+    return discovered.map((check) => {
+      const remoteCheck = result.checkResults.find((c) => c.id === check.kind);
+      const exitCode = remoteCheck?.exitCode ?? null;
+      return {
+        id: check.kind,
+        kind: check.kind,
+        status: exitCode === 0 ? ("passed" as const) : exitCode === null ? ("blocked" as const) : baselineFailingIds?.has(check.kind) ? ("pre-existing-failure" as const) : ("failed" as const),
+        result: {
+          argv: check.argv,
+          cwd: `codebuild://${result.sourceKey}`,
+          exitCode,
+          timedOut: result.status === "TIMED_OUT",
+          durationMs: result.durationMs,
+          stdoutSummary: result.logExcerpt.slice(-8_000),
+          stderrSummary: "",
+          sandboxMode: "codebuild" as const,
+        },
+        notes: `CodeBuild build ${result.jobId} (${result.status}); logs: ${result.logsReference}`,
+      };
+    });
+  }
+
   private async execute(runId: string): Promise<void> {
-    const { store, worktrees, intelligence, model, runner } = this.deps;
+    const { store, worktrees, intelligence, model } = this.deps;
     const initial = await store.getRun(runId);
     if (!initial) return;
     let run: RunRecord = initial;
@@ -187,7 +256,7 @@ export class Pipeline {
 
       // ── BASELINE_VERIFICATION ───────────────────────────────────────────
       if (run.state === "BASELINE_VERIFICATION") {
-        run.baselineChecks = await runChecks(runner, integration.path).catch((err: Error) => {
+        run.baselineChecks = await this.runVerificationChecks(run, integration.path, "baseline").catch((err: Error) => {
           throw Object.assign(err, { blocked: true });
         });
         await this.runs.audit(run.id, run.repositoryId, "system", "verification.baseline", "ok", run.baselineChecks.map((c) => `${c.kind}:${c.status}`).join(", "));
@@ -352,7 +421,7 @@ export class Pipeline {
       if (run.state === "FINAL_VERIFICATION") {
         const baselineFailing = new Set(run.baselineChecks.filter((c) => c.status === "failed").map((c) => c.id));
         for (;;) {
-          run.verificationChecks = await runChecks(runner, integration.path, { baselineFailingIds: baselineFailing });
+          run.verificationChecks = await this.runVerificationChecks(run, integration.path, "final", baselineFailing);
           const comparison = compareImpact(
             run.plan!.predictedAffectedPaths.map((p) => p.path),
             run.changedPaths,
@@ -460,6 +529,7 @@ export class Pipeline {
         err instanceof RepositoryIntelligenceError ||
         err instanceof GitHubNotConfiguredError ||
         (err as { name?: string }).name === "SandboxUnavailableError" ||
+        (err as { name?: string }).name === "RemoteExecutionError" ||
         (err as { blocked?: boolean }).blocked === true;
       fresh.error = message;
       await this.runs.save(fresh);

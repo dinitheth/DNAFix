@@ -43,6 +43,13 @@ app.get("/api/v1/config/status", async () => ({
   projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH), path: process.env.PROJECT_DNA_PATH ?? null },
   github: { configured: deps.github.configured },
   sandboxMode: deps.runner.mode,
+  execution: {
+    provider: process.env.DNAFIX_EXECUTION_PROVIDER === "codebuild" ? "codebuild" : "local",
+    remoteConfigured: deps.remoteExecution?.configured() ?? false,
+    project: process.env.AWS_CODEBUILD_PROJECT ?? null,
+    bucket: process.env.AWS_ARTIFACT_BUCKET ?? process.env.AWS_ARTIFACTS_BUCKET ?? null,
+    region: process.env.AWS_REGION ?? "ap-southeast-2",
+  },
   workflowEngine: process.env.WORKFLOW_ENGINE === "temporal" ? "temporal" : "in-process-durable",
   temporalAddress: process.env.TEMPORAL_ADDRESS ?? null,
 }));

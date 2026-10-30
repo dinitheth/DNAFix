@@ -20,6 +20,19 @@ export interface RepositoryRecord {
   createdAt: string;
 }
 
+export interface RemoteExecutionRecord {
+  phase: "baseline" | "final";
+  provider: string;
+  buildId: string | null;
+  status: string;
+  sourceKey: string | null;
+  sourceSha256: string | null;
+  artifactsLocation: string | null;
+  logsReference: string | null;
+  summary: string;
+  createdAt: string;
+}
+
 export interface TaskRecord {
   taskId: string;
   status: "pending" | "running" | "completed" | "failed";
@@ -55,6 +68,7 @@ export interface RunRecord {
   tasks: TaskRecord[];
   baselineChecks: VerificationCheck[];
   verificationChecks: VerificationCheck[] | null;
+  remoteExecutions?: RemoteExecutionRecord[];
   verifierReview: VerifierReview | null;
   diff: string;
   changedPaths: string[];

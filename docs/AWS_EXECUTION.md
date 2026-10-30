@@ -2,6 +2,12 @@
 
 Status: **Provisioned 2026-10-31** after user approval and verified sign-in (project 121728644078, FREE plan, $180 credits). Created exactly as proposed: bucket `dnafix-artifacts-121728644078`, log group `/aws/codebuild/dnafix-build`, role `dnafix-codebuild-role`, project `dnafix-build`. **Execution caveat**: CodeBuild concurrency quotas are 0 on this FREE-plan project, so `StartBuild` returns `AccountLimitExceededException`; quota-increase request `4aee81ce64f447d9ad02c752d923a689` (Linux/Small → 1) is PENDING and may require a paid-plan upgrade in AWS Settings. No other resources were created; spend so far is effectively $0 (no builds have run).
 
+## SDK integration + Stage B verification (2026-10-31)
+
+DNAFix now integrates AWS through AWS SDK for JavaScript v3 behind the `RemoteExecutionProvider` port (`packages/remote-execution`): `SdkCodeBuildOperations` (StartBuild/BatchGetBuilds/StopBuild), `SdkS3Operations` (SSE-AES256 PutObject/GetObject), `SdkLogsOperations` (paginated GetLogEvents). The pipeline invokes the provider for baseline and final verification when `DNAFIX_EXECUTION_PROVIDER=codebuild`; per-command exit codes are recovered from `DNAFIX_CHECK_*` markers in CloudWatch logs; execution records (build ID, source SHA-256, S3 keys, artifact/log references) persist on the run. AWS failures surface as `RemoteExecutionError` → run `BLOCKED`. There is no silent local fallback.
+
+Stage B (read-only, repeatable via `pnpm tsx scripts/validate-aws-config.mts`) verified against the live account on 2026-10-31: caller identity `AccountFullAccessRole` in account 121728644078; project `dnafix-build` = S3 source, `BUILD_GENERAL1_SMALL`, `aws/codebuild/standard:7.0`, privilegedMode **false**, timeout 20, concurrency 1, role `dnafix-codebuild-role`; bucket in ap-southeast-2 with all public-access blocks on and AES256 default encryption; log group retention 14 days; the role's inline policy passes the least-privilege validator (allowlisted actions, bucket/log-group-scoped resources). One nuance: the role's S3 object access is bucket-wide, so per-run prefix isolation (`runs/<run-id>/`) is enforced by DNAFix key discipline, not by IAM conditions. CodeBuild Linux/Small concurrency quota is still **0** (case `CASE_OPENED`); no quota increase will be requested and no plan upgraded without maintainer approval. **Stage C (one live smoke build) requires separate explicit approval and has not been run.**
+
 ## Verified environment facts
 
 - OS: Windows; AWS CLI 2.37.12 installed; `uv` 0.12.5 installed. No local Docker (by design).

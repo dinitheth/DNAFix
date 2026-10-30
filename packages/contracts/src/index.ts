@@ -181,7 +181,7 @@ export const CommandResultSchema = z.object({
   durationMs: z.number().nonnegative(),
   stdoutSummary: z.string().max(8_000),
   stderrSummary: z.string().max(8_000),
-  sandboxMode: z.enum(["docker", "host"]),
+  sandboxMode: z.enum(["docker", "host", "codebuild"]),
 });
 export type CommandResult = z.infer<typeof CommandResultSchema>;
 
