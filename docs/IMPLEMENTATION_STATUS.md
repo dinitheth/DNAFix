@@ -1,55 +1,58 @@
 # Implementation Status
 
-Updated: 2026-10-31. This file is updated after each verification run; entries marked
-UNTESTED have working implementations but were not executed in this environment.
+Updated: 2026-10-31 (stabilization review). This document is the single status record for DNAFix. Entries are marked **VERIFIED** (executed with recorded evidence), **IMPLEMENTED–UNTESTED** (code exists, not executed against the real service), or **BLOCKED** (external dependency outstanding). Where an early entry was superseded (for example, the model smoke test was initially blocked before a key was supplied and later verified live), only the final reconciled state is stated.
 
-## Environment constraints discovered
+## Environment
 
-- Host Node is v24.13.0; Project DNA requires Node >=22.23.2 <23. A portable Node 22.23.2 runtime is used for all Project DNA work. DNAFix pins the same runtime (`.nvmrc`, `engines`).
-- Docker CLI exists but the daemon is not running → Docker sandbox, PostgreSQL and Temporal via compose are UNTESTED here.
-- No `MODEL_API_KEY` → real Muse Wonder calls UNTESTED (`pnpm model:smoke` is the gated smoke test).
-- No GitHub App credentials → GitHub issue/PR flows UNTESTED against the real API (adapter covered by mocked-fetch contract tests).
+- DNAFix pins Node `>=22.23.2 <23` (`.nvmrc`, `engines`) and pnpm 9.15.4, matching Project DNA. The host machine also has Node 24; all DNAFix verification below ran under a portable Node 22.23.2 runtime.
+- Local machine has no Docker (user choice) and limited disk; remote execution is designed around AWS (below).
+- AWS: authenticated via `aws login` (project 121728644078, `AccountFullAccessRole`, selected Region ap-southeast-2; FREE plan, $180 credits to 2027-04-30). Agent Toolkit installed; AWS MCP configured for OpenCode with `AWS_MCP_PROXY_PROFILES=dnafix-dev`; AWS MCP tools load in a fresh OpenCode session.
 
 ## Stage status
 
 | Stage | Status |
 |---|---|
-| 1. Architecture foundation | Implemented; verification results appended below after test run. |
-| 2. Project DNA integration | Bridge implemented against the real `IProjectDNAService`; real-analysis test is env-gated (`PROJECT_DNA_PATH`). Result recorded below. |
-| 3. Muse Wonder integration | **VERIFIED LIVE 2026-10-31**: `pnpm model:smoke` exit 0 against `https://api.meta.ai/v1/responses` (`muse-wonder-1.0`), and a complete API-driven run (`run_335bd754-004`) went planning → human plan approval → coding-agent patch (`price * (1 - percentOff / 100)`) → tests passed (exit 0) → verifier `approve` → human PR approval → `COMPLETED` with local patch delivery (GitHub unconfigured, `pullRequestUrl: null`, honestly recorded). |
-| 4. Execution engine | Worktrees, scope-enforced patches, argv command policy, host + Docker runners implemented. Docker mode UNTESTED (daemon down); host mode exercised by tests. |
-| 5. Verification and repair | Test discovery, baseline vs post-change runs, diff-vs-impact comparison, max-2 repair loop, verifier review implemented. |
-| 6. GitHub delivery | GitHub App JWT adapter, webhook HMAC, draft-PR-only creation implemented; approval gate enforced in API + pipeline. Real API UNTESTED. |
-| 7. Multi-agent | Max-2 parallel tasks with disjoint scopes, separate worktrees, overlap detection, ordered integration implemented; parallel logic unit-tested, pipeline sequential-integration path integration-tested. |
-| 8. Final validation | See command results below. |
+| 1. Architecture foundation | **VERIFIED** — monorepo, contracts, domain, persistence port, Fastify API, React web; gates in the verification section. |
+| 2. Project DNA integration | **VERIFIED** — bridge over the real `IProjectDNAService`; bridge test passes against a checkout @ c8454b9 (fixture analysed at the exact commit; `getImpact()` surfaced the real dependent). Analysis is recomputed for the impact stage (snapshot reuse is a known optimization, not yet implemented). |
+| 3. Muse Wonder integration | **VERIFIED LIVE** — `pnpm model:smoke` exit 0 for `muse-wonder-1.0` (Responses API) and for `muse-spark-1.3`; complete live run `run_335bd754-004` reached `COMPLETED` through both human gates. (The smoke test was blocked until the user supplied `MODEL_API_KEY`; there is no remaining "untested model" state.) |
+| 4. Execution engine | **VERIFIED (host mode)** for worktrees, scope-enforced patches, deletion allowlist, argv policy. Docker runner **IMPLEMENTED–UNTESTED** (no local Docker). |
+| 5. Verification and repair | **VERIFIED** — baseline vs final checks with recorded exit codes, diff-vs-impact, verifier review, max-2 repair loop, repair-deletion guard with audit evidence. |
+| 6. GitHub delivery | **IMPLEMENTED–UNTESTED** against the real GitHub API (no GitHub App credentials configured). Adapter is contract-tested with mocked fetch (JWT, webhook HMAC, draft-only payload; no merge method exists). Approval gates enforced. Verified runs without GitHub complete as local patch delivery with `pullRequestUrl: null`. |
+| 7. Multi-agent | **VERIFIED at unit/integration level** — max-2 parallel disjoint-scope tasks, validated worktree reuse/reset, overlap detection, ordered integration. |
+| 8. Final validation | **VERIFIED** — see the gate results below (re-run at every stabilization pass). |
 
-## Known limitations
+## Verification results (latest full run)
 
-- Single-user API auth is an optional bearer token (`DNAFIX_SESSION_TOKEN`); multi-user OAuth/GitHub login is future work.
-- Local persistence defaults to a JSON file store; the PostgreSQL Drizzle schema + migration are provided (`pnpm db:migrate`) but the Postgres store adapter is not yet wired.
-- Temporal workflow/activities are implemented; the default local engine is the in-process durable engine (ADR-0004). Temporal execution UNTESTED (no server).
-- Project DNA bridge re-runs analysis for the impact pass (correctness over speed).
-- Evaluation harness (`scripts/evaluate.ts`) requires a real model key; no comparison results are claimed.
+- `pnpm -r --if-present typecheck` → **exit 0** (all workspace projects).
+- `pnpm lint` → **exit 0**.
+- `pnpm -r --if-present build` → **exit 0** (web production bundle; api/worker builds).
+- `pnpm vitest run` → **46 passed, 1 skipped, 0 failed**. The skipped test is the env-gated real Project DNA bridge test, which passes when `PROJECT_DNA_PATH` is set (8.7s, verified separately). Coverage includes: domain rules, command policy/env scrubbing, budget reservation + dynamic caps + incomplete-response usage, GitHub contract, git worktree lifecycle incl. validated reuse/reset, CodeBuild provider (fake CLI), offline end-to-end pipeline, and the repair-deletion guard integration test.
+- Live model evidence: Wonder smoke 21,873 total tokens (first call; planning prompts were subsequently capped) and Spark smoke 4,558 on the identical prompt; live run `run_335bd754-004` (patch, tests exit 0, verifier approve, COMPLETED).
+- Repository: pushed to https://github.com/dinitheth/DNAFix (`main`: `6a7a3ba` codebase, `cd7d41a` accepted eval-v1.2 artifacts).
 
-## Verification results
+## Evaluation status (Milestone 2)
 
-Run 2026-10-31 under portable Node 22.23.2 + pnpm 9.15.4:
+| Pilot | State |
+|---|---|
+| eval-v1 (`RESULTS.md`) | **INVALID** — DNA arm blocked by a pruned Project DNA workspace install (environment failure, since repaired and re-verified). Baseline failed; its repair loop deleted a core file, producing the deletion guard. |
+| eval-v1.1 (`RESULTS-V1.1.md`) | **INCONCLUSIVE** — identical plans; both arms failed at the second task for distinct engineering reasons (dirty retry worktree; 8,192-token output cap). Fixes implemented and tested. |
+| eval-v1.2 (`RESULTS-V1.2.md`) | **COMPLETED and ACCEPTED by the maintainer** as a recorded pilot outcome: DNA-aware COMPLETED (5/5 acceptance, 1 file changed, 33,934 tokens, $0.55) vs baseline BLOCKED (0/5, 2 repairs, 80,231 tokens, $1.29), same base commit, blind-reviewed. **n=1: exploratory only, no statistical claim.** No further experiment is running or will start without explicit approval. |
 
-- `pnpm -r --if-present typecheck` → **exit 0** (all 15 workspace projects, incl. the fetch-based model provider with no unsafe casts).
-- `pnpm vitest run` → **30 passed, 1 skipped, 0 failed** (9 files). Includes: domain state machine/scope/plan rules (9), command policy + host runner (4), GitHub webhook/JWT/draft-PR contract (3), model provider incl. mocked-fetch Meta transport, request-shape and schema-rejection tests (6), Project DNA adapter misconfiguration (1), git worktree lifecycle (2), CodeBuild provider with fake CLI (3), and the full offline pipeline integration test (fixture baseline test genuinely fails pre-fix, passes post-fix with exit code recorded; approval gates exercised; local-patch completion with `pullRequestUrl: null` because GitHub is unconfigured).
-- Real Project DNA bridge test with `PROJECT_DNA_PATH` set to a checkout @ c8454b9: **passed in 8.7s** — the bridge analysed the fixture repo at the exact base commit and `getImpact()` for `src/discount.ts` surfaced `src/cart.ts` as impacted, matching the real import graph.
-- `pnpm -r --if-present build` → **exit 0** (web production bundle built; api/worker typecheck builds pass).
-- `pnpm model:smoke` → initially blocked (no key); **later verified live** for both `muse-wonder-1.0` and `muse-spark-1.3` once the user supplied `MODEL_API_KEY`, plus a complete live pipeline run — see stage 3 above.
-- AWS: **authenticated** (`aws login`, account/project 121728644078, `AccountFullAccessRole`, selected Region ap-southeast-2; FREE plan, $180 credits to 2027-04-30). Agent Toolkit installed (24 skills, catalog verified); OpenCode MCP entry carries `AWS_MCP_PROXY_PROFILES=dnafix-dev` (as `environment`); starter rules in `AGENTS.md`. AWS MCP tools load in the next OpenCode session (per AWS guide), not this one. **Provisioned** (approved proposal): S3 bucket `dnafix-artifacts-121728644078` (private, encrypted, 14-day lifecycle), log group `/aws/codebuild/dnafix-build` (14-day retention), role `dnafix-codebuild-role`, CodeBuild project `dnafix-build` (small, 20-min cap, concurrency 1, no privileged mode). **Remote job execution is currently blocked**: all CodeBuild concurrency quotas are 0 on this FREE-plan project (`AccountLimitExceededException`); a quota increase to 1 (Linux/Small, request `4aee81ce64f447d9ad02c752d923a689`) is PENDING with AWS and may require upgrading the project to the paid plan in AWS Settings — a user decision. First remote job will be re-run as soon as the quota lands.
-- Model cost note: the first smoke call returned 21,531 output tokens (the model enumerated acceptance-criteria paraphrases). Planning prompts now cap requirements/criteria/steps/tasks; the subsequent live run produced 2 acceptance criteria and 1 task.
-- Role-based model split (user decision 2026-10-31): lead planner = Muse Wonder; coding + verification sub-agents = Muse Spark (`MUSE_SPARK_MODEL`, default `muse-spark-1.3`). Spark verified live on the same smoke (exit 0, 4,558 total tokens vs Wonder's 21,873 on the identical prompt). Typecheck exit 0; full suite 30 passed on re-run (one earlier run had 2 failures that did not reproduce and whose output was truncated — recorded as flaky, not hidden).
-- Milestone 2 evaluation: pilot eval-v1 INVALID (DNA arm blocked by a pruned Project DNA workspace install; repaired and re-verified), pilot eval-v1.1 inconclusive (both arms failed at the second task for distinct engineering reasons) — see `docs/evaluation/RESULTS.md` and `RESULTS-V1.1.md`. An eval-v1.2 pair was launched under the user's earlier approval and is running untouched; its results are held for user review and are not treated as accepted. No further experiment will start without explicit approval.
-- Hardening after eval findings: deny-by-default exact-path deletion allowlist sourced from plan-approved `approvedDeletions` (tested incl. audit + never-committed repair deletions); validated worktree reuse (`createOrReuseWorktree` — managed path, registration, branch/ownership, HEAD checks; unexpected git errors propagate; reset restricted to managed worktrees); `BudgetedModelProvider` with pre-request reservation, dynamic per-request output caps from remaining budget, $3 + 250k ceilings, and usage retained from incomplete responses (`incomplete_details.reason` surfaced).
+## Failures, flaky observations, and unverified integrations (kept separate from passes)
 
-## Remaining limitations
+- **Flaky (non-reproducing)**: one early full-suite run reported 2 failures with truncated output that did not reproduce on re-run; one later run had a single failure under resource contention with a running pilot. All stabilization gate runs since are fully green. These are recorded, not hidden.
+- **BLOCKED — CodeBuild execution**: project `dnafix-build`, bucket, log group and role are provisioned in ap-southeast-2 (approved), but all CodeBuild concurrency quotas are 0 on the FREE plan. Quota-increase request `4aee81ce64f447d9ad02c752d923a689` remains **pending/case opened** with AWS. No plan upgrade has been made and none will be made without approval; no additional resources will be provisioned.
+- **IMPLEMENTED–UNTESTED**: Docker sandbox execution (no local Docker), Temporal execution (no server run; in-process durable engine is the verified default, ADR-0004), GitHub draft-PR creation against the real API, PostgreSQL store adapter (schema + migration provided; JSON file store is the current runtime), AWS MCP tools inside an agent session (configured; load in a fresh session).
 
-- Host-sandbox execution is acceptable only for the DNAFix-authored benchmark fixture; arbitrary external repositories await OS-level isolation (CodeBuild quota still 0 / case opened; Docker unavailable locally by user choice).
-- Evaluation evidence remains n=1 per pilot; no statistical claims.
-- Temporal and GitHub draft-PR paths remain untested against real services (no Temporal server run; no GitHub App credentials configured).
+## Limitations (preserved explicitly)
 
-Defects found by tests and fixed during this run: OpenAI SDK parse-helper typing (transport rewritten), root workspace resolution for tests/scripts (vitest aliases + root tsconfig paths), Windows `.cmd` shim spawning in the host runner, CRLF-vs-LF patch anchors on Windows checkouts, fixture `node --test` directory form on Windows, a JWT test decoding bug.
+- **Host sandbox is not OS-level isolation.** It is acceptable only for the DNAFix-authored benchmark/fixture code. Arbitrary external repositories or untrusted build scripts must not be executed on the host; they require CodeBuild (quota pending) or properly restricted containers.
+- **Real GitHub PR creation is unverified** — no credentials configured; verified runs deliver a local patch instead, recorded as such.
+- **Temporal production execution is unverified** — workflow/activity code exists and typechecks; the exercised engine is the in-process durable engine.
+- Single-user bearer-token API auth; no multi-user OAuth yet.
+- Evaluation evidence is n=1 per pilot; results must not be quoted as statistical proof.
+- Model usage/cost figures are estimates from API `usage` fields at published Standard-mode rates.
+
+## Defects found by testing and fixed (historical record)
+
+OpenAI SDK parse-helper typing (transport rewritten to typed fetch + local Zod validation, SDK removed); root workspace resolution for tests/scripts (vitest aliases + root tsconfig paths); Windows `.cmd` shim spawning in the host runner; CRLF-vs-LF patch anchors on Windows checkouts; fixture `node --test` directory form on Windows; JWT test decoding bug; eval TAP parser matching `# Subtest:` comment lines (fixed parser + deterministic re-scoring of saved patches); repair loop deleting core files (deny-by-default deletion allowlist); dirty retry worktrees (validated reuse + base reset); 8,192-token cap starving patch generation (raised to 16,384 with explicit incomplete-response accounting).
