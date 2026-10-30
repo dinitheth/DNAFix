@@ -12,15 +12,29 @@ The baseline's catastrophic failure (literal `replace` inserted in place of an i
 
 1. **Frozen coding conditions**: same prepared benchmark repository and base-commit procedure, same issue text, same prompts, same model for every role (`muse-wonder-1.0`, Responses transport, no reasoning override), same tools and patch contract, same permissions, same budgets (12 calls / 250,000 tokens / $3 per arm / 16,384 max output tokens per request with pre-request reservation), same hidden acceptance suite (A1–A5), same frozen ground truth (`BENCHMARK_REFERENCE.md`). No tuning between arms or between pairs.
 2. **Reviewer evidence improved (reviewer-only change)**: the blind reviewer receives the base repository context (relevant source files), the diff, the executed test results, and the per-criterion acceptance results — instead of the diff alone as in v1–v1.2. The condition mapping stays sealed until all reviews for a pair are submitted. Deterministic test results remain authoritative over AI review.
-3. **Explicit failure taxonomy** — every arm records exactly one terminal failure class when it does not complete:
-   - `invalid-patch-generation` (model produced unparseable/corrupt patch content; eval-v1.2 baseline's `replace` import is the canonical example)
-   - `patch-application-error` (anchor/scope/containment rejection)
-   - `compilation-or-load-failure` (changed code cannot be imported/parsed)
-   - `test-failure` (acceptance or regression suite executed and failed)
-   - `repair-exhausted` (bounded repair attempts used without recovery)
-   - `infrastructure-blocked` (environment/integration failure before or outside model control; eval-v1 DNA arm)
-   - `budget-exceeded` (call/token/monetary ceiling)
-   - `model-empty-response` (no usable structured output, incl. `status: incomplete`)
+3. **Explicit failure taxonomy** — the underlying failure and the recovery outcome are recorded as separate fields and must never be conflated:
+   - `failure_class` — the original technical failure. Recorded for **every arm that encountered a failure, including arms that later completed successfully**; `null` only when no failure occurred:
+     - `invalid-patch-generation` (model produced unparseable/corrupt patch content; eval-v1.2 baseline's `replace` import is the canonical example)
+     - `patch-application-error` (anchor/scope/containment rejection)
+     - `compilation-or-load-failure` (changed code cannot be imported/parsed)
+     - `test-failure` (acceptance or regression suite executed and failed)
+     - `infrastructure-blocked` (environment/integration failure before or outside model control; eval-v1 DNA arm)
+     - `budget-exceeded` (call/token/monetary ceiling)
+     - `model-empty-response` (no usable structured output, incl. `status: incomplete`)
+   - `recovery_status` — what happened after that failure: `not-needed` (no failure, or no repair triggered), `recovered` (a repair attempt restored a passing state), or `exhausted` (bounded repair attempts were used without recovery). `exhausted` is a recovery outcome, **not** a root-cause failure class; there is no `repair-exhausted` failure class.
+   - `repair_attempts` — the number of repair attempts actually made (integer, bounded by the frozen repair limit).
+
+   Recording rule (the three fields are always present in every run record):
+
+   | Situation | `failure_class` | `recovery_status` |
+   | --- | --- | --- |
+   | No failure occurred | `null` | `not-needed` |
+   | Failure successfully repaired (arm may complete) | Original failure category | `recovered` |
+   | Failure not recovered | Original failure category | `exhausted` |
+
+   A successful arm that needed repair therefore still records its original `failure_class` with `recovery_status: recovered`; completion never erases the failure from the structured record.
+
+   Worked example (preserved permanently): the eval-v1.2 baseline is classified as `failure_class: invalid-patch-generation`, `recovery_status: exhausted`, `repair_attempts: 2`. Its corrupt import is the failure; the two unsuccessful repairs are the recovery outcome. Neither field may be reported as a substitute for the other.
    "Agent failed" is not an acceptable category.
 4. **Randomization and isolation**: execution order randomized per pair and recorded; separate worktrees, data directories, stores and conversation state per arm; the prepared repository is read-only shared input; no arm can observe the other's artifacts. Model ID, transport, pricing table and all configuration values are written into every run record (`EvaluationRunRecordSchema`).
 5. **Narrow conclusions**: 3–5 replicated pairs on this benchmark measure **repeatability on this benchmark only**. Generalization requires the separate, previously unseen multi-module issue (step 2 of the maintainer's sequence), which will get its own frozen reference before any run. No quantitative performance claim before both stages complete.
