@@ -225,6 +225,7 @@ export class Pipeline {
         // Resolve model-nominated targets against the real tree, then query Project DNA impact for them.
         const known = new Set(run.intelligence!.files);
         const targets = output.nominatedTargets.filter((t) => known.has(t)).slice(0, 20);
+        run.nominatedTargets = targets;
         if (targets.length > 0) {
           run.intelligence = await intelligence.analyze({ rootPath: integration.path, baseCommitSha: run.baseCommitSha!, targetPaths: targets });
           run.impactSnapshotId = `${run.intelligence.repositoryId}@v${run.intelligence.analysisVersion ?? "unknown"}`;

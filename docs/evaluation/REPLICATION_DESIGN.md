@@ -2,6 +2,21 @@
 
 Status: **DESIGN ONLY. No replication run is authorized or started.** Execution requires explicit maintainer approval.
 
+## Harness version decision (maintainer-approved 2026-10-31)
+
+Replication runs under the current hardened implementation as **`replication-v1.3`** — the eval-v1.2 results are **not** an exact implementation replay and must not be presented as one. The v1.2 code is not rolled back. Differences between the code that executed eval-v1.2 and replication-v1.3 (coding prompts, acceptance tests, issue text, model IDs and budget constants are **unchanged**):
+
+| Area | eval-v1.2 execution | replication-v1.3 |
+| --- | --- | --- |
+| Budget enforcement | static per-request cap (8192→16384), post-response metering | `BudgetedModelProvider`: pre-request reservation + dynamic output caps + post-response checks |
+| Worktree reuse | catch-fallback reuse + reset | validated reuse (`createOrReuseWorktree`: registration/branch/HEAD checks), unexpected git errors propagate |
+| Deletion policy | deny-by-default exact-path allowlist | unchanged |
+| Failure recording | free-text error only | structured `failureClass` / `recoveryStatus` / ordered `failureEvents` |
+| Reviewer evidence | diff only (`checks: []`) | anonymized review packets: repo context + executed checks + A1–A5 results |
+| Provenance | base commit SHA only | + DNAFix Git SHA & dirty flag, Project DNA Git SHA, benchmark tree hash, randomization seed |
+
+Readiness must be re-audited against these eight areas before any pair is authorized.
+
 ## Interpretation locked for eval-v1.2
 
 > The experiment demonstrates that the DNA-aware pipeline produced a substantially better result on this task. It does **not** yet prove that Project DNA caused the improvement.

@@ -215,8 +215,17 @@ export const EvaluationRunRecordSchema = z.object({
   repository: z.object({
     fixture: z.string().min(1),
     baseCommitSha: z.string().regex(/^[0-9a-f]{7,64}$/i),
+    treeHash: z.string().default(""),
     preparedAt: z.string().min(1),
   }),
+  randomizationSeed: z.number().int().default(0),
+  provenance: z
+    .object({
+      dnafixGitSha: z.string().nullable().default(null),
+      dnafixDirty: z.boolean().default(false),
+      projectDnaGitSha: z.string().nullable().default(null),
+    })
+    .default({}),
   issue: z.object({ title: z.string(), body: z.string() }),
   configuration: z.object({
     modelId: z.string(),
@@ -266,6 +275,15 @@ export const EvaluationRunRecordSchema = z.object({
     baselineChecks: z.array(z.object({ kind: z.string(), status: z.string(), exitCode: z.number().nullable() })),
     verificationChecks: z.array(z.object({ kind: z.string(), status: z.string(), exitCode: z.number().nullable() })),
     verifierVerdict: z.string().nullable(),
+    verifierReview: VerifierReviewSchema.nullable().default(null),
+    failureClass: z
+      .enum(["invalid-patch-generation", "patch-application-error", "compilation-or-load-failure", "test-failure", "infrastructure-blocked", "budget-exceeded", "model-empty-response"])
+      .nullable()
+      .default(null),
+    recoveryStatus: z.enum(["not-needed", "recovered", "exhausted"]).default("not-needed"),
+    failureEvents: z
+      .array(z.object({ stage: z.string(), failureClass: z.string(), detail: z.string(), attempt: z.number().int() }))
+      .default([]),
   }),
   usage: z.object({
     modelCalls: z.number().int(),

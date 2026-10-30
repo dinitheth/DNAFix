@@ -1,12 +1,16 @@
 /**
- * Blind independent review of evaluation patches.
- * Reads ONLY patch-A.diff / patch-B.diff + the frozen issue/criteria.
+ * Blind independent review of evaluation patches (replication-v1.3).
+ * Reads ONLY review-packet-A.json / review-packet-B.json produced by the
+ * evaluation harness: anonymized diff, changed files, base repository context,
+ * executed check results and per-criterion acceptance results.
  * The reviewer (Muse Spark — a different model from the arms' executor) never
- * sees condition names, run IDs, or review-mapping.json.
+ * sees condition names, run IDs, Project DNA labels, or review-mapping.json.
+ * Incomplete packets are refused: review must not proceed on missing evidence.
  * Usage: tsx scripts/blind-review.mts docs/evaluation/runs/<experiment-id>
  */
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { assertPacketAnonymized, assertPacketComplete, ReviewPacketError, type ReviewPacket } from "@dnafix/domain";
 import { MetaModelProvider } from "@dnafix/model-provider";
 
 const runsDir = process.argv[2];
@@ -19,35 +23,46 @@ if (!process.env.MODEL_API_KEY) {
   process.exit(2);
 }
 
-const CRITERIA = [
-  "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
-  "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
-  "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
-  "Promo codes are case-insensitive.",
-  "Orders without a promo code behave exactly as before; no existing behavior regresses.",
-];
+const ACCEPTANCE_IDS = ["A1", "A2", "A3", "A4", "A5"] as const;
 
-// Identifyingscrub check: diffs must not contain run ids, branch names, or condition labels.
-for (const name of ["patch-A.diff", "patch-B.diff"]) {
-  const text = await readFile(path.join(runsDir, name), "utf8");
-  const leaks = text.match(/run_[a-z0-9-]+|dnafix\/|baseline|dna-aware|scripted/i);
-  if (leaks) {
-    console.error(`blind-review ABORTED: ${name} contains identifying metadata: ${leaks[0]}`);
-    process.exit(1);
+async function loadPacket(label: "A" | "B"): Promise<ReviewPacket> {
+  let raw: string;
+  try {
+    raw = await readFile(path.join(runsDir, `review-packet-${label}.json`), "utf8");
+  } catch {
+    throw new ReviewPacketError(`review-packet-${label}.json not found in ${runsDir}. Blind review requires evidence packets (replication-v1.3); refusing to review a bare diff.`);
   }
+  const packet = JSON.parse(raw) as ReviewPacket;
+  if (packet.label !== label) throw new ReviewPacketError(`packet label mismatch: expected ${label}, got ${packet.label}`);
+  assertPacketAnonymized(packet);
+  assertPacketComplete(packet, ACCEPTANCE_IDS);
+  return packet;
 }
-console.log("Anonymization scrub: patch-A.diff and patch-B.diff contain no run IDs, branch names, or condition labels.");
+
+const packets = { A: await loadPacket("A"), B: await loadPacket("B") };
+console.log("Anonymization + completeness checks passed for review packets A and B (repo context, executed checks, A1-A5 results present; no arm identifiers).");
 
 const reviewer = new MetaModelProvider({ model: process.env.MUSE_SPARK_MODEL ?? "muse-spark-1.3" });
 const reviews: Record<string, unknown> = {};
 for (const label of ["A", "B"] as const) {
-  const diff = await readFile(path.join(runsDir, `patch-${label}.diff`), "utf8");
+  const packet = packets[label];
   const review = await reviewer.reviewVerification({
     issueTitle: "Promo codes are accepted but silently ignored (benchmark issue, frozen criteria)",
-    acceptanceCriteria: CRITERIA,
+    acceptanceCriteria: packet.acceptance.map((a) => a.id),
     predictedPaths: [],
-    changedPaths: [],
-    diff: diff.trim() === "" ? "(empty patch — no changes were produced)" : diff,
+    changedPaths: packet.changedFiles,
+    diff: [
+      packet.diff,
+      "",
+      "--- Base repository context (files at the base commit) ---",
+      ...packet.repositoryContext.map((f) => `### ${f.path}\n${f.content}`),
+      "",
+      "--- Executed check results (deterministic; authoritative) ---",
+      ...packet.executedChecks.map((c) => `${c.kind}: ${c.status} (exit ${c.exitCode})`),
+      "",
+      "--- Acceptance results (deterministic; authoritative) ---",
+      ...packet.acceptance.map((a) => `${a.id}: ${a.passed ? "passed" : "failed"} — ${a.evidence}`),
+    ].join("\n"),
     checks: [],
   });
   reviews[label] = { ...review, usageAfterCall: reviewer.lastUsage };
@@ -58,7 +73,7 @@ await writeFile(
   JSON.stringify(
     {
       reviewer: { provider: "meta", modelId: reviewer.modelId, note: "AI review is supplementary; deterministic acceptance/regression results are authoritative." },
-      rubric: CRITERIA,
+      evidenceMode: "review-packets (repository context + executed checks + A1-A5 results)",
       anonymizationScrubPassed: true,
       mappingSealedUntilReviewCompleted: true,
       reviews,

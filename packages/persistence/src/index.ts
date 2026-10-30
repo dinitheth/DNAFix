@@ -44,6 +44,8 @@ export interface RunRecord {
   repositorySnapshotId: string | null;
   /** Snapshot ID of the second (impact-stage) intelligence analysis, when it ran. */
   impactSnapshotId?: string | null;
+  /** Repository-resolved targets the planner nominated for impact analysis. */
+  nominatedTargets?: string[];
   state: WorkflowState;
   modelProvider: string;
   workflowEngine: string;

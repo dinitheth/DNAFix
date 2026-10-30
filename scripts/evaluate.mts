@@ -16,6 +16,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { Pipeline, RunService } from "@dnafix/application";
+import { assertPacketAnonymized, assertPacketComplete, classifyArmFailure, executionOrderFromSeed, patchAssignmentFromSeed, type ReviewPacket } from "@dnafix/domain";
 import { EvaluationRunRecordSchema, type EvaluationRunRecord, type RepositoryIntelligenceReport } from "@dnafix/contracts";
 import { HostCommandRunner } from "@dnafix/execution";
 import { GitWorktreeManager } from "@dnafix/git-engine";
@@ -103,7 +104,15 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return (await exec("git", args, { cwd, maxBuffer: 32 * 1024 * 1024 })).stdout;
 }
 
-async function prepareBenchmark(stamp: string): Promise<{ repoPath: string; baseCommitSha: string }> {
+async function gitSha(dir: string): Promise<string | null> {
+  try {
+    return (await exec("git", ["rev-parse", "HEAD"], { cwd: dir })).stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+async function prepareBenchmark(stamp: string): Promise<{ repoPath: string; baseCommitSha: string; treeHash: string }> {
   const root = await mkdtemp(path.join(tmpdir(), `dnafix-eval-${stamp}-`));
   const repoPath = path.join(root, "repo");
   await cp(FIXTURE, repoPath, { recursive: true });
@@ -113,7 +122,8 @@ async function prepareBenchmark(stamp: string): Promise<{ repoPath: string; base
   await git(repoPath, ["add", "-A"]);
   await git(repoPath, ["commit", "-m", "Benchmark fixture: orderflow (frozen eval-v1)"]);
   const baseCommitSha = (await git(repoPath, ["rev-parse", "HEAD"])).trim();
-  return { repoPath, baseCommitSha };
+  const treeHash = (await git(repoPath, ["rev-parse", "HEAD^{tree}"])).trim();
+  return { repoPath, baseCommitSha, treeHash };
 }
 
 interface ArmOutcome {
@@ -129,6 +139,9 @@ async function runArm(args: {
   baseCommitSha: string;
   intelligence: RepositoryIntelligence;
   dataRoot: string;
+  treeHash: string;
+  seed: number;
+  provenance: { dnafixGitSha: string | null; dnafixDirty: boolean; projectDnaGitSha: string | null };
 }): Promise<ArmOutcome> {
   const metered = new BudgetedModelProvider(new MetaModelProvider({ model: MODEL_ID }), {
     maxCalls: MAX_MODEL_CALLS,
@@ -207,13 +220,26 @@ async function runArm(args: {
   const recall = (serviceChanged ? 0.5 : 0) + (rejectionWorks ? 0.5 : 0);
   const precision = changed.length === 0 ? null : Math.round((relevantChanged.length / changed.length) * 1000) / 1000;
 
+  const classification = classifyArmFailure({
+    finalState: final.state,
+    error: final.error,
+    repairAttempts: final.repairAttempts,
+    budgetExceeded: metered.budgetExceeded,
+    tasks: final.tasks,
+    verificationChecks: (final.verificationChecks ?? []).map((c) => ({ kind: c.kind, status: c.status })),
+    acceptanceAllPassed: acceptance.length > 0 && acceptance.every((a) => a.passed),
+    diff: final.diff,
+  });
+
   const record: EvaluationRunRecord = {
     experimentId: args.experimentId,
-    experimentVersion: "eval-v1.2",
+    experimentVersion: "replication-v1.3",
     condition: args.condition,
     executionOrder: args.executionOrder,
     runId: run.id,
-    repository: { fixture: "tests/fixtures/benchmark-repo", baseCommitSha: args.baseCommitSha, preparedAt: new Date().toISOString() },
+    repository: { fixture: "tests/fixtures/benchmark-repo", baseCommitSha: args.baseCommitSha, treeHash: args.treeHash, preparedAt: new Date().toISOString() },
+    randomizationSeed: args.seed,
+    provenance: args.provenance,
     issue: { title: ISSUE_TITLE, body: ISSUE_BODY },
     configuration: {
       modelId: MODEL_ID,
@@ -250,10 +276,14 @@ async function runArm(args: {
       repairAttempts: final.repairAttempts,
       tasks: final.tasks.map((t) => ({ taskId: t.taskId, status: t.status, changedPaths: t.changedPaths, attempts: t.attempts, patchSummary: t.patchSummary, error: t.error })),
       plannedScope: [...new Set((final.plan?.tasks ?? []).flatMap((t) => t.fileScope))],
-      nominatedTargets: [],
+      nominatedTargets: final.nominatedTargets ?? [],
       baselineChecks: final.baselineChecks.map((c) => ({ kind: c.kind, status: c.status, exitCode: c.result?.exitCode ?? null })),
       verificationChecks: (final.verificationChecks ?? []).map((c) => ({ kind: c.kind, status: c.status, exitCode: c.result?.exitCode ?? null })),
       verifierVerdict: final.verifierReview?.verdict ?? null,
+      verifierReview: final.verifierReview,
+      failureClass: classification.failureClass,
+      recoveryStatus: classification.recoveryStatus,
+      failureEvents: classification.failureEvents,
     },
     usage: {
       modelCalls: metered.calls.length,
@@ -287,11 +317,16 @@ const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
 const experimentId = `pilot-${stamp}`;
 const outDir = path.join(REPO_ROOT, "docs", "evaluation", "runs", experimentId);
 await mkdir(outDir, { recursive: true });
-const { repoPath, baseCommitSha } = await prepareBenchmark(stamp);
+const { repoPath, baseCommitSha, treeHash } = await prepareBenchmark(stamp);
 console.log(`Experiment ${experimentId}\nBenchmark base commit: ${baseCommitSha}`);
 
-const dnaFirst = randomInt(2) === 0;
-const order: Array<"baseline" | "dna-aware"> = dnaFirst ? ["dna-aware", "baseline"] : ["baseline", "dna-aware"];
+const seed = randomInt(2 ** 31);
+const order = executionOrderFromSeed(seed);
+const provenance = {
+  dnafixGitSha: await gitSha(REPO_ROOT),
+  dnafixDirty: (await exec("git", ["status", "--porcelain"], { cwd: REPO_ROOT }).catch(() => ({ stdout: "" }))).stdout.trim().length > 0,
+  projectDnaGitSha: process.env.PROJECT_DNA_PATH ? await gitSha(process.env.PROJECT_DNA_PATH) : null,
+};
 console.log(`Execution order (randomized): ${order.join(" -> ")}`);
 
 const outcomes = new Map<string, ArmOutcome>();
@@ -306,13 +341,16 @@ for (const [index, condition] of order.entries()) {
     baseCommitSha,
     intelligence,
     dataRoot: path.join(tmpdir(), `dnafix-eval-${stamp}-${condition}`),
+    treeHash,
+    seed,
+    provenance,
   });
   outcomes.set(condition, outcome);
   console.log(`${condition}: state=${outcome.record.outcome.finalState} tokens=${outcome.record.usage.totalTokens} cost=$${outcome.record.usage.estimatedCostUsd} repairs=${outcome.record.outcome.repairAttempts}`);
 }
 
-// Anonymized patches: random A/B assignment, sealed mapping.
-const assignA = randomInt(2) === 0 ? "baseline" : "dna-aware";
+// Anonymized patches: A/B assignment derived from the same recorded seed, sealed mapping.
+const assignA = patchAssignmentFromSeed(seed).a;
 const assignB = assignA === "baseline" ? "dna-aware" : "baseline";
 await writeFile(path.join(outDir, "patch-A.diff"), outcomes.get(assignA)!.diff, "utf8");
 await writeFile(path.join(outDir, "patch-B.diff"), outcomes.get(assignB)!.diff, "utf8");
@@ -329,10 +367,38 @@ const summary = {
   baseCommitSha,
   executionOrder: order,
   budget: { maxModelCalls: MAX_MODEL_CALLS, maxTotalTokens: MAX_TOTAL_TOKENS, maxCostUsd: MAX_COST_USD, maxOutputTokensPerRequest: MAX_OUTPUT_TOKENS_PER_REQUEST, pricing: PRICING },
+  randomizationSeed: seed,
+  provenance,
   baseline: outcomes.get("baseline")!.record,
   dnaAware: outcomes.get("dna-aware")!.record,
 };
 await writeFile(path.join(outDir, "summary.json"), JSON.stringify(summary, null, 2), "utf8");
+// Blind-review packets: anonymized, evidence-complete, mapping-sealed.
+{
+  const { readFile } = await import("node:fs/promises");
+  for (const [label, condition] of [["A", assignA], ["B", assignB]] as const) {
+    const outcome = outcomes.get(condition)!;
+    const contextPaths = [...new Set([...outcome.record.outcome.plannedScope, ...ACCEPTABLE])].slice(0, 6);
+    const repositoryContext: ReviewPacket["repositoryContext"] = [];
+    for (const rel of contextPaths) {
+      const content = await readFile(path.join(repoPath, rel), "utf8").catch(() => null);
+      if (content !== null) repositoryContext.push({ path: rel, content: content.slice(0, 20_000) });
+    }
+    const packet: ReviewPacket = {
+      label,
+      diff: outcome.diff || "(empty patch — no changes were produced)",
+      changedFiles: outcome.record.outcome.changedFiles,
+      repositoryContext,
+      executedChecks: outcome.record.outcome.verificationChecks.map((c) => ({ kind: c.kind, status: c.status, exitCode: c.exitCode })),
+      acceptance: outcome.record.scoring.acceptance,
+    };
+    assertPacketAnonymized(packet);
+    assertPacketComplete(packet, ["A1", "A2", "A3", "A4", "A5"]);
+    await writeFile(path.join(outDir, `review-packet-${label}.json`), JSON.stringify(packet, null, 2), "utf8");
+  }
+  console.log("Blind-review packets written (anonymized, evidence-complete).");
+}
+
 console.log(`\nArtifacts written to ${outDir}`);
 console.log(JSON.stringify({
   baseline: { state: summary.baseline.outcome.finalState, acceptance: summary.baseline.scoring.acceptance.map((a) => `${a.id}:${a.passed}`), precision: summary.baseline.scoring.precision, recall: summary.baseline.scoring.recall, tokens: summary.baseline.usage.totalTokens, costUsd: summary.baseline.usage.estimatedCostUsd, durationMs: summary.baseline.outcome.durationMs },
