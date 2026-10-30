@@ -6,6 +6,7 @@ import { idempotencyTokenFor, validateManifest, type ExecutionCommand, type Exec
 import { isTerminalStatus, mapBuildStatus, parseCheckMarkers, type ExecutionStatus } from "./status.js";
 import type { AwsClients } from "./aws-operations.js";
 import { createAwsClients } from "./aws-operations.js";
+import { RunRoleManager } from "./run-role.js";
 
 /**
  * Remote execution port. Domain/orchestration code depends only on this
@@ -40,6 +41,8 @@ export interface RemoteJobResult {
   checkResults: RemoteCheckResult[];
   summary: string;
   durationMs: number;
+  /** Per-run scoped IAM role used for this build, and whether cleanup deleted it. */
+  executionRole?: { arn: string; deleted: boolean } | null;
 }
 
 export interface RemoteExecutionProvider {
@@ -55,6 +58,10 @@ export interface CodeBuildConfig {
   projectName: string;
   artifactsBucket: string;
   logGroupName: string;
+  /** AWS account ID (for log-group ARNs in per-run role policies). Not a secret. */
+  accountId?: string;
+  /** Per-run scoped IAM roles. Default true; disabling requires an explicit, recorded decision. */
+  perRunRoles?: boolean;
 }
 
 function defaultGitRunner(cwd: string): (args: string[]) => Promise<string> {
@@ -140,6 +147,27 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       metadata: { runid: spec.runId },
     });
 
+    // Per-run scoped execution role. Failure here aborts the job: DNAFix never
+    // falls back to the shared project role for untrusted code execution.
+    let runRole: { roleName: string; arn: string } | null = null;
+    let roleManager: RunRoleManager | null = null;
+    if (this.config.perRunRoles !== false) {
+      if (!this.config.accountId) {
+        throw new Error("Per-run role isolation requires AWS_ACCOUNT_ID (used for log-group ARNs in the scoped policy). Refusing to run under the shared project role.");
+      }
+      roleManager = new RunRoleManager(
+        this.clients.iam,
+        {
+          bucket: this.config.artifactsBucket,
+          region: this.config.region,
+          accountId: this.config.accountId,
+          logGroupName: this.config.logGroupName,
+        },
+        Number(process.env.DNAFIX_ROLE_PROPAGATION_MS ?? 8_000),
+      );
+      runRole = await roleManager.createRunRole(spec.runId);
+    }
+
     const { buildId } = await this.clients.codebuild.startBuild({
       projectName: this.config.projectName,
       sourceLocation: `${this.config.artifactsBucket}/${keys.sourceKey}`,
@@ -148,8 +176,17 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       artifactsPath: `runs/${spec.runId}/artifacts`,
       timeoutInMinutes: manifest.timeoutMinutes,
       idempotencyToken: idempotencyTokenFor(spec.runId, bundle.sha256),
+      ...(runRole ? { serviceRoleArn: runRole.arn } : {}),
+    }).catch(async (err: Error) => {
+      if (runRole && roleManager) await roleManager.deleteRunRole(runRole.roleName);
+      throw err;
     });
     base.jobId = buildId;
+    const cleanupRole = async (): Promise<boolean> => {
+      if (!runRole || !roleManager) return true;
+      const deleted = await roleManager.deleteRunRole(runRole.roleName);
+      return deleted;
+    };
 
     const deadline = Date.now() + (this.pollTimeoutMs ?? (manifest.timeoutMinutes + 2) * 60_000);
     let build: Awaited<ReturnType<AwsClients["codebuild"]["batchGetBuilds"]>>[number] | undefined;
@@ -161,6 +198,7 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       if (isTerminalStatus(status)) break;
       if (Date.now() > deadline) {
         await this.clients.codebuild.stopBuild(buildId).catch(() => undefined);
+        const deleted = await cleanupRole();
         return {
           ...base,
           status: "TIMED_OUT",
@@ -168,6 +206,7 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
           logsReference: build.logsDeepLink,
           summary: `Poll deadline (${manifest.timeoutMinutes + 2} min) exceeded; stop requested for build ${buildId}.`,
           durationMs: Date.now() - startedAt,
+          executionRole: runRole ? { arn: runRole.arn, deleted } : null,
         };
       }
       await sleep(this.pollIntervalMs);
@@ -192,6 +231,7 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
     }
     const markers = parseCheckMarkers(logText);
     const checkResults = spec.commands.map((c) => ({ id: c.id, kind: c.kind, exitCode: markers.get(c.id) ?? null }));
+    const roleDeleted = await cleanupRole();
     return {
       ...base,
       status,
@@ -203,6 +243,7 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
         ? `CodeBuild status: ${build!.status}; log retrieval failed: ${logsError}`
         : `CodeBuild status: ${build!.status}; checks: ${checkResults.map((c) => `${c.id}=${c.exitCode ?? "unknown"}`).join(", ")}`,
       durationMs: Date.now() - startedAt,
+      executionRole: runRole ? { arn: runRole.arn, deleted: roleDeleted } : null,
     };
   }
 }
@@ -216,6 +257,8 @@ export function codeBuildProviderFromEnv(clients?: AwsClients): CodeBuildExecuti
       projectName: process.env.AWS_CODEBUILD_PROJECT ?? "",
       artifactsBucket: process.env.AWS_ARTIFACT_BUCKET ?? process.env.AWS_ARTIFACTS_BUCKET ?? "",
       logGroupName: process.env.AWS_CLOUDWATCH_LOG_GROUP ?? "/aws/codebuild/dnafix-build",
+      accountId: process.env.AWS_ACCOUNT_ID ?? "",
+      perRunRoles: process.env.DNAFIX_PER_RUN_ROLES !== "false",
     },
     clients ?? createAwsClients(region),
   );

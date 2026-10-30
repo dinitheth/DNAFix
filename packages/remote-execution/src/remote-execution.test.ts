@@ -108,7 +108,7 @@ describe("IAM policy validation", () => {
   });
 });
 
-function fakeClients(buildSequence: BuildInfo[], logText: string, captured?: { starts: Array<Record<string, unknown>>; puts: string[] }) {
+function fakeClients(buildSequence: BuildInfo[], logText: string, captured?: { starts: Array<Record<string, unknown>>; puts: string[]; roles: string[] }) {
   let poll = 0;
   const clients: AwsClients = {
     codebuild: {
@@ -126,9 +126,20 @@ function fakeClients(buildSequence: BuildInfo[], logText: string, captured?: { s
       getObjectText: async () => "{}",
     },
     logs: { getLogText: async () => logText },
+    iam: {
+      createRole: async (input) => {
+        captured?.roles.push(`create:${input.roleName}`);
+        return { arn: `arn:aws:iam::121728644078:role/${input.roleName}` };
+      },
+      deleteRole: async (roleName) => {
+        captured?.roles.push(`delete:${roleName}`);
+      },
+    },
   };
   return clients;
 }
+
+process.env.DNAFIX_ROLE_PROPAGATION_MS = "0";
 
 const spec = {
   runId: "run_test1",
@@ -137,7 +148,7 @@ const spec = {
   commands: [{ id: "test", kind: "test" as const, argv: ["npm", "run", "test"] }],
   timeoutMinutes: 5,
 };
-const config = { profile: "dnafix-dev", region: "ap-southeast-2", projectName: "dnafix-build", artifactsBucket: "bucket", logGroupName: "/aws/codebuild/dnafix-build" };
+const config = { profile: "dnafix-dev", region: "ap-southeast-2", projectName: "dnafix-build", artifactsBucket: "bucket", logGroupName: "/aws/codebuild/dnafix-build", accountId: "121728644078" };
 const succeeded: BuildInfo = { id: "dnafix-build:123", status: "SUCCEEDED", logGroupName: "/aws/codebuild/dnafix-build", logStreamName: "stream-1", logsDeepLink: "https://console.aws.amazon.com/cloudwatch", artifactsLocation: "arn:aws:s3:::bucket/runs/run_test1/artifacts" };
 
 describe("CodeBuildExecutionProvider (mocked AWS clients)", () => {
@@ -145,7 +156,7 @@ describe("CodeBuildExecutionProvider (mocked AWS clients)", () => {
     const root = await mkdtemp(path.join(tmpdir(), "dnafix-provider-"));
     await exec("git", ["init", "-b", "main"], { cwd: root });
     await writeFile(path.join(root, "package.json"), "{}");
-    const captured = { starts: [] as Array<Record<string, unknown>>, puts: [] as string[] };
+    const captured = { starts: [] as Array<Record<string, unknown>>, puts: [] as string[], roles: [] as string[] };
     const inProgress: BuildInfo = { ...succeeded, status: "IN_PROGRESS" };
     const provider = new CodeBuildExecutionProvider(config, fakeClients([inProgress, succeeded], "DNAFIX_CHECK_BEGIN test\nok\nDNAFIX_CHECK_END test 0", captured), 1);
     const result = await provider.runJob({ ...spec, workspacePath: root });
@@ -198,5 +209,36 @@ describe("CodeBuildExecutionProvider (mocked AWS clients)", () => {
     const provider = new CodeBuildExecutionProvider({ ...config, projectName: "" }, fakeClients([succeeded], ""), 1);
     expect(provider.configured()).toBe(false);
     await expect(provider.runJob(spec)).rejects.toThrow(/not configured/);
+  });
+
+  it("creates a per-run scoped role, overrides the build role, and deletes it after", async () => {
+    const captured = { starts: [] as Array<Record<string, unknown>>, puts: [] as string[], roles: [] as string[] };
+    const provider = new CodeBuildExecutionProvider(config, fakeClients([succeeded], "DNAFIX_CHECK_END test 0", captured), 1, undefined);
+    // Skip IAM propagation delay in tests by using a 0-delay manager path (provider default is 8s; override via env-free subclass not needed: poll interval small, accept delay via fake timers not available) — instead assert with delay tolerated.
+    const result = await provider.runJob(spec);
+    expect(result.executionRole?.arn).toContain("dnafix-run-run_test1");
+    expect(result.executionRole?.deleted).toBe(true);
+    expect(captured.roles).toEqual(["create:dnafix-run-run_test1", "delete:dnafix-run-run_test1"]);
+    expect(captured.starts[0]?.serviceRoleArn).toContain("dnafix-run-run_test1");
+  }, 30_000);
+
+  it("refuses the shared project role when per-run isolation is unavailable", async () => {
+    const provider = new CodeBuildExecutionProvider({ ...config, accountId: "" }, fakeClients([succeeded], ""), 1);
+    await expect(provider.runJob(spec)).rejects.toThrow(/Per-run role isolation requires AWS_ACCOUNT_ID/);
+  });
+});
+
+describe("per-run role policy", () => {
+  it("scopes every resource to the run's own prefixes", async () => {
+    const { buildRunRolePolicy, runRoleName } = await import("./run-role.js");
+    const policy = buildRunRolePolicy({ bucket: "bucket", region: "ap-southeast-2", accountId: "121728644078", logGroupName: "/aws/codebuild/dnafix-build", runId: "run_42" }) as {
+      Statement: Array<{ Action: string[]; Resource: string | string[] }>;
+    };
+    const resources = policy.Statement.flatMap((s) => (Array.isArray(s.Resource) ? s.Resource : [s.Resource]));
+    for (const resource of resources.filter((r) => r.includes("s3"))) {
+      expect(resource === "arn:aws:s3:::bucket" || resource.includes("runs/run_42/"), resource).toBe(true);
+    }
+    expect(runRoleName("run_42/x")).toBe("dnafix-run-run_42-x");
+    expect(runRoleName("a".repeat(100)).length).toBeLessThanOrEqual(64);
   });
 });

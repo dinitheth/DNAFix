@@ -1,6 +1,8 @@
 import { BatchGetBuildsCommand, CodeBuildClient, StartBuildCommand, StopBuildCommand } from "@aws-sdk/client-codebuild";
 import { CloudWatchLogsClient, GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
+import { IAMClient } from "@aws-sdk/client-iam";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { SdkIamOperations, type IamOperations } from "./run-role.js";
 
 /**
  * Operation ports over AWS SDK for JavaScript v3.
@@ -28,6 +30,8 @@ export interface CodeBuildOperations {
     artifactsPath: string;
     timeoutInMinutes: number;
     idempotencyToken: string;
+    /** Per-run scoped role ARN. When set, overrides the project role for this build only. */
+    serviceRoleArn?: string;
   }): Promise<{ buildId: string }>;
   batchGetBuilds(ids: string[]): Promise<BuildInfo[]>;
   stopBuild(id: string): Promise<void>;
@@ -53,6 +57,7 @@ export class SdkCodeBuildOperations implements CodeBuildOperations {
     artifactsPath: string;
     timeoutInMinutes: number;
     idempotencyToken: string;
+    serviceRoleArn?: string;
   }): Promise<{ buildId: string }> {
     const out = await this.client.send(
       new StartBuildCommand({
@@ -64,6 +69,7 @@ export class SdkCodeBuildOperations implements CodeBuildOperations {
         timeoutInMinutesOverride: input.timeoutInMinutes,
         computeTypeOverride: "BUILD_GENERAL1_SMALL",
         idempotencyToken: input.idempotencyToken,
+        ...(input.serviceRoleArn ? { serviceRoleOverride: input.serviceRoleArn } : {}),
         // privilegedMode is never overridden: the project's disabled setting stands.
       }),
     );
@@ -133,6 +139,7 @@ export interface AwsClients {
   codebuild: CodeBuildOperations;
   s3: S3Operations;
   logs: LogsOperations;
+  iam: IamOperations;
 }
 
 export function createAwsClients(region: string): AwsClients {
@@ -140,5 +147,6 @@ export function createAwsClients(region: string): AwsClients {
     codebuild: new SdkCodeBuildOperations(new CodeBuildClient({ region })),
     s3: new SdkS3Operations(new S3Client({ region })),
     logs: new SdkLogsOperations(new CloudWatchLogsClient({ region })),
+    iam: new SdkIamOperations(new IAMClient({ region })),
   };
 }
