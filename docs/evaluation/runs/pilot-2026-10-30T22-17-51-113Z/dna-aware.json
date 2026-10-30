@@ -1,0 +1,185 @@
+{
+  "experimentId": "pilot-2026-10-30T22-17-51-113Z",
+  "experimentVersion": "eval-v1.2",
+  "condition": "dna-aware",
+  "executionOrder": 1,
+  "runId": "run_d92ea196-202",
+  "repository": {
+    "fixture": "tests/fixtures/benchmark-repo",
+    "baseCommitSha": "430832e921198b4974957a06c238017b7ce981ba",
+    "preparedAt": "2026-10-30T22:21:43.396Z"
+  },
+  "issue": {
+    "title": "Promo codes are accepted but silently ignored",
+    "body": "Customers can submit a promoCode when creating an order (for example WELCOME10), and the API accepts and stores it, but the discount is never applied: discountAmount is always 0 and totals are unchanged.\n\nExpected behavior:\n- A valid promo code applies its percentage discount to the order subtotal, before tax. Valid codes and their percentages are defined in the promo code registry (src/validation/promo-codes.ts), which is the single source of truth.\n- Tax is calculated on the discounted subtotal.\n- The free-shipping threshold is evaluated on the discounted subtotal.\n- Promo codes are case-insensitive.\n- An unknown promo code is rejected as a validation error (the API returns 400) and no order is stored.\n- Orders without a promo code behave exactly as they do today.\n\nAcceptance criteria:\n- A 120 order with WELCOME10 has discountAmount 12, tax 10.8, free shipping, total 118.8.\n- A 105 order with WELCOME10 pays shipping because the discounted subtotal is below the free-shipping threshold.\n- Unknown codes return HTTP 400 from the order handler.\n- All existing tests continue to pass."
+  },
+  "configuration": {
+    "modelId": "muse-wonder-1.0",
+    "subAgentModelId": "muse-wonder-1.0",
+    "transport": "responses",
+    "reasoningEffort": null,
+    "maxRepairAttempts": 2,
+    "maxModelCalls": 12,
+    "maxTotalTokens": 250000,
+    "maxCostUsd": 3,
+    "maxOutputTokensPerRequest": 16384,
+    "sandboxMode": "host",
+    "workflowEngine": "in-process-durable",
+    "intelligenceProvider": "project-dna"
+  },
+  "intelligenceSnapshot": {
+    "repositoryId": "0d6c1e0ac0e8ac6176248f7732b839583323c646416ec2560efcad645726e265",
+    "analysisVersion": 1,
+    "snapshotId": "0d6c1e0ac0e8ac6176248f7732b839583323c646416ec2560efcad645726e265@v1",
+    "planningSnapshotId": "0d6c1e0ac0e8ac6176248f7732b839583323c646416ec2560efcad645726e265@v1",
+    "impactSnapshotId": null,
+    "baseCommitSha": "430832e921198b4974957a06c238017b7ce981ba",
+    "complete": true,
+    "warnings": []
+  },
+  "outcome": {
+    "finalState": "COMPLETED",
+    "error": null,
+    "durationMs": 229713,
+    "changedFiles": [
+      "src/services/order-service.ts"
+    ],
+    "diffPath": "patch-B.diff",
+    "repairAttempts": 0,
+    "tasks": [
+      {
+        "taskId": "task-1",
+        "status": "completed",
+        "changedPaths": [
+          "src/services/order-service.ts"
+        ],
+        "attempts": 2,
+        "patchSummary": "Apply the registered promo discount in OrderService before calculating tax and shipping, and reject unknown promo codes before saving the order.",
+        "error": "delete of 'src/services/order-service.ts' denied: path is not in the explicitly approved deletion allowlist [empty] (deny-by-default)"
+      }
+    ],
+    "plannedScope": [
+      "src/services/order-service.ts",
+      "src/pricing/discount.ts",
+      "src/validation/order-validator.ts",
+      "src/validation/promo-codes.ts"
+    ],
+    "nominatedTargets": [],
+    "baselineChecks": [
+      {
+        "kind": "test",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "kind": "typecheck",
+        "status": "not-executed",
+        "exitCode": null
+      },
+      {
+        "kind": "lint",
+        "status": "not-executed",
+        "exitCode": null
+      }
+    ],
+    "verificationChecks": [
+      {
+        "kind": "test",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "kind": "typecheck",
+        "status": "not-executed",
+        "exitCode": null
+      },
+      {
+        "kind": "lint",
+        "status": "not-executed",
+        "exitCode": null
+      }
+    ],
+    "verifierVerdict": "approve"
+  },
+  "usage": {
+    "modelCalls": 4,
+    "calls": [
+      {
+        "method": "analyzeAndPlan",
+        "inputTokens": 3025,
+        "outputTokens": 5851,
+        "totalTokens": 8876
+      },
+      {
+        "method": "generatePatch",
+        "inputTokens": 1737,
+        "outputTokens": 6133,
+        "totalTokens": 7870
+      },
+      {
+        "method": "generatePatch",
+        "inputTokens": 1737,
+        "outputTokens": 9833,
+        "totalTokens": 11570
+      },
+      {
+        "method": "reviewVerification",
+        "inputTokens": 1390,
+        "outputTokens": 4228,
+        "totalTokens": 5618
+      }
+    ],
+    "inputTokens": 7889,
+    "outputTokens": 26045,
+    "totalTokens": 33934,
+    "budgetExceeded": false,
+    "pricing": {
+      "currency": "USD",
+      "inputPerMillion": 4,
+      "outputPerMillion": 20,
+      "source": "dev.meta.ai/docs/pricing-rate-limits (Muse Wonder Standard, checked 2026-10-31)"
+    },
+    "estimatedCostUsd": 0.5525
+  },
+  "scoring": {
+    "acceptance": [
+      {
+        "id": "A1",
+        "passed": true,
+        "evidence": "ok 1 - A1: WELCOME10 applies 10% before tax; free shipping evaluated after discount (>=100)"
+      },
+      {
+        "id": "A2",
+        "passed": true,
+        "evidence": "ok 2 - A2: discounted subtotal below 100 pays shipping (threshold is post-discount)"
+      },
+      {
+        "id": "A3",
+        "passed": true,
+        "evidence": "ok 3 - A3: unknown promo code is rejected and no order is stored"
+      },
+      {
+        "id": "A4",
+        "passed": true,
+        "evidence": "ok 4 - A4: STUDENT5 applies 5% and stored order matches response totals"
+      },
+      {
+        "id": "A5",
+        "passed": true,
+        "evidence": "ok 5 - A5: promo code does not change orders without a promo code (regression)"
+      }
+    ],
+    "regressionPassed": true,
+    "regressionExitCode": 0,
+    "acceptanceExitCode": 0,
+    "precision": 1,
+    "recall": 1,
+    "recallDetail": "recall = 0.5 for changing src/services/order-service.ts + 0.5 for A3 (unknown-code rejection) passing, so alternative validation locations are scored fairly",
+    "relevantChanged": [
+      "src/services/order-service.ts"
+    ],
+    "unrelatedChanged": [],
+    "missingRequired": []
+  },
+  "createdAt": "2026-10-30T22:21:43.397Z"
+}

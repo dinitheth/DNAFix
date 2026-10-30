@@ -1,0 +1,89 @@
+diff --git a/src/services/order-service.ts b/src/services/order-service.ts
+index 28f7bac..91a17a0 100644
+--- a/src/services/order-service.ts
++++ b/src/services/order-service.ts
+@@ -4,7 +4,7 @@ import { round2 } from "../pricing/money.ts";
+ import { shippingFee } from "../pricing/shipping.ts";
+ import { calculateTax } from "../pricing/tax.ts";
+ import { OrderRepository } from "../repositories/order-repository.ts";
+-import { validateCreateOrderInput } from "../validation/order-validator.ts";
++replace
+ 
+ export class OrderService {
+   private readonly repository: OrderRepository;
+diff --git a/src/validation/order-validator.ts b/src/validation/order-validator.ts
+index bdfe144..d656ecf 100644
+--- a/src/validation/order-validator.ts
++++ b/src/validation/order-validator.ts
+@@ -1,4 +1,5 @@
+ import type { CreateOrderInput } from "../domain/order.ts";
++import { lookupPromoPercent } from "./promo-codes.ts";
+ 
+ export class OrderValidationError extends Error {
+   readonly code: string;
+@@ -26,4 +27,7 @@ export function validateCreateOrderInput(input: CreateOrderInput): void {
+   if (input.promoCode !== undefined && typeof input.promoCode !== "string") {
+     throw new OrderValidationError("promoCode must be a string", "INVALID_PROMO");
+   }
++  if (typeof input.promoCode === "string" && lookupPromoPercent(input.promoCode.toUpperCase()) === null) {
++    throw new OrderValidationError(`unknown promo code: ${input.promoCode}`, "INVALID_PROMO");
++  }
+ }
+diff --git a/test/order-handler.test.mjs b/test/order-handler.test.mjs
+index b580b23..926cf9d 100644
+--- a/test/order-handler.test.mjs
++++ b/test/order-handler.test.mjs
+@@ -13,5 +13,4 @@ test("handler returns 400 for empty items", () => {
+   const handler = createOrderHandler();
+   const res = handler({ customerId: "c1", items: [] });
+   assert.equal(res.status, 400);
+-  assert.equal(res.body.error, "EMPTY_ITEMS");
+-});
++  assert.equal(res.body.error, \"EMPTY_ITEMS\");\r\n});\r\n\r\ntest(\"handler returns 400 for unknown promo code\", () => {\r\n  const handler = createOrderHandler();\r\n  const res = handler({ customerId: \"c1\", items: [{ sku: \"a\", unitPrice: 10, quantity: 2 }], promoCode: \"UNKNOWNCODE\" });\r\n  assert.equal(res.status, 400);\r\n});
+diff --git a/test/order-service.test.mjs b/test/order-service.test.mjs
+index 6eeef1b..0d96929 100644
+--- a/test/order-service.test.mjs
++++ b/test/order-service.test.mjs
+@@ -1,21 +1,21 @@
+-import assert from "node:assert/strict";
+-import { test } from "node:test";
+-import { OrderService } from "../src/services/order-service.ts";
+-
+-test("order without promo: subtotal + tax + shipping", () => {
+-  const service = new OrderService();
+-  const order = service.createOrder({ customerId: "c1", items: [{ sku: "a", unitPrice: 50, quantity: 1 }] });
+-  assert.equal(order.subtotal, 50);
+-  assert.equal(order.discountAmount, 0);
+-  assert.equal(order.tax, 5);
+-  assert.equal(order.shipping, 9.95);
+-  assert.equal(order.total, 64.95);
+-  assert.equal(service.getOrder(order.id)?.total, 64.95);
+-});
+-
+-test("order without promo over threshold gets free shipping", () => {
+-  const service = new OrderService();
+-  const order = service.createOrder({ customerId: "c1", items: [{ sku: "a", unitPrice: 120, quantity: 1 }] });
+-  assert.equal(order.shipping, 0);
+-  assert.equal(order.total, 132);
+-});
++import assert from "node:assert/strict";
++import { test } from "node:test";
++import { OrderService } from "../src/services/order-service.ts";
++
++test("order without promo: subtotal + tax + shipping", () => {
++  const service = new OrderService();
++  const order = service.createOrder({ customerId: "c1", items: [{ sku: "a", unitPrice: 50, quantity: 1 }] });
++  assert.equal(order.subtotal, 50);
++  assert.equal(order.discountAmount, 0);
++  assert.equal(order.tax, 5);
++  assert.equal(order.shipping, 9.95);
++  assert.equal(order.total, 64.95);
++  assert.equal(service.getOrder(order.id)?.total, 64.95);
++});
++
++test("order without promo over threshold gets free shipping", () => {
++  const service = new OrderService();
++  const order = service.createOrder({ customerId: "c1", items: [{ sku: "a", unitPrice: 120, quantity: 1 }] });
++  assert.equal(order.shipping, 0);
++  assert.equal(order.total, 132);
++});\n\r\ntest(\"promo WELCOME10 on 120 applies discount before tax with free shipping\", () => {\r\n  const service = new OrderService();\r\n  const order = service.createOrder({ customerId: \"c1\", items: [{ sku: \"a\", unitPrice: 120, quantity: 1 }], promoCode: \"WELCOME1

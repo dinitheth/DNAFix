@@ -1,0 +1,34 @@
+diff --git a/src/services/order-service.ts b/src/services/order-service.ts
+index 28f7bac..f59c1e5 100644
+--- a/src/services/order-service.ts
++++ b/src/services/order-service.ts
+@@ -4,7 +4,9 @@ import { round2 } from "../pricing/money.ts";
+ import { shippingFee } from "../pricing/shipping.ts";
+ import { calculateTax } from "../pricing/tax.ts";
+ import { OrderRepository } from "../repositories/order-repository.ts";
+-import { validateCreateOrderInput } from "../validation/order-validator.ts";
++import { OrderValidationError, validateCreateOrderInput } from "../validation/order-validator.ts";
++import { applyPercentageDiscount } from "../pricing/discount.ts";
++import { lookupPromoPercent } from "../validation/promo-codes.ts";
+ 
+ export class OrderService {
+   private readonly repository: OrderRepository;
+@@ -16,10 +18,14 @@ export class OrderService {
+   createOrder(input: CreateOrderInput): Order {
+     validateCreateOrderInput(input);
+     const subtotal = round2(input.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0));
+-    // NOTE: input.promoCode is currently accepted and stored, but never applied.
+-    const discountAmount = 0;
+-    const tax = calculateTax(subtotal);
+-    const shipping = shippingFee(subtotal);
++    const promoPercent = input.promoCode ? lookupPromoPercent(input.promoCode) : null;
++    if (input.promoCode && promoPercent === null) {
++      throw new OrderValidationError(`unknown promo code: ${input.promoCode}`, "INVALID_PROMO");
++    }
++    const discountAmount = promoPercent !== null ? applyPercentageDiscount(subtotal, promoPercent) : 0;
++    const discountedSubtotal = round2(subtotal - discountAmount);
++    const tax = calculateTax(discountedSubtotal);
++    const shipping = shippingFee(discountedSubtotal);
+     const order: Order = {
+       id: randomUUID(),
+       customerId: input.customerId,
