@@ -1,0 +1,107 @@
+{
+  "reviewer": {
+    "provider": "meta",
+    "modelId": "muse-spark-1.3",
+    "note": "AI review is supplementary; deterministic acceptance/regression results are authoritative."
+  },
+  "rubric": [
+    "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+    "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+    "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+    "Promo codes are case-insensitive.",
+    "Orders without a promo code behave exactly as before; no existing behavior regresses."
+  ],
+  "anonymizationScrubPassed": true,
+  "mappingSealedUntilReviewCompleted": true,
+  "reviews": {
+    "A": {
+      "summary": "Empty patch with changedPaths=[] and checks=[] provides no implementation or execution evidence for any promo-code behavior; regression behavior also lacks test evidence. Hypothesis: no fix was implemented.",
+      "verdict": "request-changes",
+      "criteria": [
+        {
+          "criterion": "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+          "status": "not-satisfied",
+          "evidence": "diff=\"(empty patch — no changes were produced)\"; changedPaths=[]; checks=[]: no implementation and no execution evidence for discount. Hypothesis: requirement unimplemented."
+        },
+        {
+          "criterion": "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+          "status": "not-satisfied",
+          "evidence": "diff=\"(empty patch — no changes were produced)\"; changedPaths=[]; checks=[]: no implementation and no execution evidence for threshold on discounted subtotal. Hypothesis: requirement unimplemented."
+        },
+        {
+          "criterion": "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+          "status": "not-satisfied",
+          "evidence": "diff=\"(empty patch — no changes were produced)\"; changedPaths=[]; checks=[]: no implementation and no execution evidence for rejection of unknown codes. Hypothesis: requirement unimplemented."
+        },
+        {
+          "criterion": "Promo codes are case-insensitive.",
+          "status": "not-satisfied",
+          "evidence": "diff=\"(empty patch — no changes were produced)\"; changedPaths=[]; checks=[]: no implementation and no execution evidence for case-insensitivity. Hypothesis: requirement unimplemented."
+        },
+        {
+          "criterion": "Orders without a promo code behave exactly as before; no existing behavior regresses.",
+          "status": "uncertain",
+          "evidence": "diff=\"(empty patch — no changes were produced)\"; changedPaths=[]; checks=[]: empty patch suggests no change as hypothesis, but checks=[] provides no execution evidence to claim no regression."
+        }
+      ],
+      "unintendedChanges": [],
+      "missingTests": [
+        "Valid promo discount calculation test (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8)",
+        "Discounted-subtotal shipping threshold test (105 + WELCOME10 => shipping 9.95)",
+        "Unknown promo rejection test (API 400 and no order stored)",
+        "Case-insensitivity test for promo codes",
+        "No-promo regression test"
+      ],
+      "usageAfterCall": {
+        "inputTokens": 476,
+        "outputTokens": 3001,
+        "totalTokens": 3477
+      }
+    },
+    "B": {
+      "summary": "Verification failed: empty patch provides no promo-code implementation and checks provide no execution evidence, so functional criteria remain unmet.",
+      "verdict": "request-changes",
+      "criteria": [
+        {
+          "criterion": "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and changedPaths is [] and checks is []. Hypothesis: therefore no discount logic was added so the calculation cannot be satisfied."
+        },
+        {
+          "criterion": "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: therefore threshold logic on discounted subtotal was not implemented."
+        },
+        {
+          "criterion": "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: therefore no validation for unknown codes exists."
+        },
+        {
+          "criterion": "Promo codes are case-insensitive.",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: therefore no case-insensitive handling was added."
+        },
+        {
+          "criterion": "Orders without a promo code behave exactly as before; no existing behavior regresses.",
+          "status": "uncertain",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" suggesting preservation, but checks is [] so there is no execution evidence of unchanged behavior. Hypothesis: preservation likely but unconfirmed without regression tests."
+        }
+      ],
+      "unintendedChanges": [],
+      "missingTests": [
+        "Test 120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8",
+        "Test 105 + WELCOME10 => shipping 9.95 on discounted subtotal",
+        "Test unknown promo code returns API 400 and stores no order",
+        "Test promo code case-insensitivity",
+        "Test order without promo code regression"
+      ],
+      "usageAfterCall": {
+        "inputTokens": 476,
+        "outputTokens": 3099,
+        "totalTokens": 3575
+      }
+    }
+  },
+  "reviewedAt": "2026-10-30T22:13:28.834Z"
+}

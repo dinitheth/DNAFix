@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@dnafix/contracts": ["packages/contracts/src/index.ts"],
+      "@dnafix/domain": ["packages/domain/src/index.ts"],
+      "@dnafix/persistence": ["packages/persistence/src/index.ts"],
+      "@dnafix/git-engine": ["packages/git-engine/src/index.ts"],
+      "@dnafix/execution": ["packages/execution/src/index.ts"],
+      "@dnafix/verification": ["packages/verification/src/index.ts"],
+      "@dnafix/repository-intelligence": ["packages/repository-intelligence/src/index.ts"],
+      "@dnafix/model-provider": ["packages/model-provider/src/index.ts"],
+      "@dnafix/github": ["packages/github/src/index.ts"],
+      "@dnafix/agent-orchestrator": ["packages/agent-orchestrator/src/index.ts"],
+      "@dnafix/application": ["packages/application/src/index.ts"],
+      "@dnafix/remote-execution": ["packages/remote-execution/src/index.ts"]
+    }
+  },
+  "include": []
+}

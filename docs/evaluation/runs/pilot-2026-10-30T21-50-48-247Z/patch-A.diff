@@ -1,0 +1,61 @@
+diff --git a/src/services/order-service.ts b/src/services/order-service.ts
+deleted file mode 100644
+index 28f7bac..0000000
+--- a/src/services/order-service.ts
++++ /dev/null
+@@ -1,41 +0,0 @@
+-import { randomUUID } from "node:crypto";
+-import type { CreateOrderInput, Order } from "../domain/order.ts";
+-import { round2 } from "../pricing/money.ts";
+-import { shippingFee } from "../pricing/shipping.ts";
+-import { calculateTax } from "../pricing/tax.ts";
+-import { OrderRepository } from "../repositories/order-repository.ts";
+-import { validateCreateOrderInput } from "../validation/order-validator.ts";
+-
+-export class OrderService {
+-  private readonly repository: OrderRepository;
+-
+-  constructor(repository = new OrderRepository()) {
+-    this.repository = repository;
+-  }
+-
+-  createOrder(input: CreateOrderInput): Order {
+-    validateCreateOrderInput(input);
+-    const subtotal = round2(input.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0));
+-    // NOTE: input.promoCode is currently accepted and stored, but never applied.
+-    const discountAmount = 0;
+-    const tax = calculateTax(subtotal);
+-    const shipping = shippingFee(subtotal);
+-    const order: Order = {
+-      id: randomUUID(),
+-      customerId: input.customerId,
+-      items: input.items,
+-      promoCode: input.promoCode?.toUpperCase() ?? null,
+-      subtotal,
+-      discountAmount,
+-      tax,
+-      shipping,
+-      total: round2(subtotal - discountAmount + tax + shipping),
+-      createdAt: new Date().toISOString(),
+-    };
+-    return this.repository.save(order);
+-  }
+-
+-  getOrder(id: string): Order | null {
+-    return this.repository.getById(id);
+-  }
+-}
+diff --git a/src/validation/order-validator.ts b/src/validation/order-validator.ts
+index bdfe144..9f6f3c5 100644
+--- a/src/validation/order-validator.ts
++++ b/src/validation/order-validator.ts
+@@ -23,7 +23,7 @@ export function validateCreateOrderInput(input: CreateOrderInput): void {
+       throw new OrderValidationError(`invalid item: ${JSON.stringify(item)}`, "INVALID_ITEM");
+     }
+   }
+-  if (input.promoCode !== undefined && typeof input.promoCode !== "string") {
+-    throw new OrderValidationError("promoCode must be a string", "INVALID_PROMO");
++  if (input.promoCode !== undefined && (typeof input.promoCode !== "string" || !isKnownPromoCode(input.promoCode))) {
++    throw new OrderValidationError(typeof input.promoCode === "string" ? `unknown promo code: ${input.promoCode}` : "promoCode must be a string", "INVALID_PROMO");
+   }
+ }

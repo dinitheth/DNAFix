@@ -1,0 +1,20 @@
+{
+  "name": "@dnafix/application",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" },
+  "dependencies": {
+    "@dnafix/agent-orchestrator": "workspace:*",
+    "@dnafix/contracts": "workspace:*",
+    "@dnafix/domain": "workspace:*",
+    "@dnafix/execution": "workspace:*",
+    "@dnafix/git-engine": "workspace:*",
+    "@dnafix/github": "workspace:*",
+    "@dnafix/model-provider": "workspace:*",
+    "@dnafix/persistence": "workspace:*",
+    "@dnafix/repository-intelligence": "workspace:*",
+    "@dnafix/verification": "workspace:*"
+  }
+}

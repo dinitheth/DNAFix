@@ -1,0 +1,10 @@
+# Evaluation Limitations (eval-v1)
+
+- **n=1 matched pair**: exploratory evidence only; no statistical significance. Model nondeterminism means a re-run may differ.
+- **Synthetic benchmark**: the fixture is small (~11 source files) and the promo registry is grep-discoverable, so a competent baseline can succeed without DNA. This biases *against* finding a DNA advantage (conservative), but limits external validity for large real repositories.
+- **Same underlying pipeline**: both arms use DNAFix's orchestrator, patch contract and verifier; only the intelligence input differs. The experiment therefore measures the marginal value of Project DNA evidence inside DNAFix, not "DNAFix vs a commercial coding agent".
+- **Auto-approved gates**: the harness approves plan/PR gates programmatically (identically for both arms) to run unattended; human judgment in the loop could change outcomes.
+- **Host sandbox**: tests execute with `SANDBOX_MODE=host` (Docker daemon unavailable locally; CodeBuild concurrency quota is 0 on the project, checked once). The benchmark code is DNAFix-authored fixture code, not arbitrary third-party code. **Do not run arbitrary external repositories or untrusted build scripts on the host.** Host mode remains acceptable only for this controlled, DNAFix-authored benchmark fixture until genuine OS-level isolation (CodeBuild or restricted containers) is available.
+- **Usage metering**: token totals come from API `usage` fields summed by a wrapper; cached-token cost splits may be unavailable and are marked as such. Cost is an estimate at published Standard-mode rates.
+- **Blind review**: one AI reviewer (different model) plus deterministic tests; no human reviewer panel. Reviewer sees diffs + frozen criteria only.
+- **Baseline excerpt parity**: both arms receive the same number of file excerpts selected from their own file inventory; DNA-aware prompts additionally carry structured DNA evidence, so raw prompt sizes differ — total recorded tokens are the control, and budget caps are identical.

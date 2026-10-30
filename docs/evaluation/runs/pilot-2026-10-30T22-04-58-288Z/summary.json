@@ -1,0 +1,346 @@
+{
+  "experimentId": "pilot-2026-10-30T22-04-58-288Z",
+  "baseCommitSha": "f2430aa355f63bc2648776a03cf084cb9b5f3701",
+  "executionOrder": [
+    "dna-aware",
+    "baseline"
+  ],
+  "budget": {
+    "maxModelCalls": 12,
+    "maxTotalTokens": 250000,
+    "maxCostUsd": 3,
+    "maxOutputTokensPerRequest": 8192,
+    "pricing": {
+      "currency": "USD",
+      "inputPerMillion": 4,
+      "outputPerMillion": 20,
+      "source": "dev.meta.ai/docs/pricing-rate-limits (Muse Wonder Standard, checked 2026-10-31)"
+    }
+  },
+  "baseline": {
+    "experimentId": "pilot-2026-10-30T22-04-58-288Z",
+    "experimentVersion": "eval-v1.1",
+    "condition": "baseline",
+    "executionOrder": 2,
+    "runId": "run_5ba6828e-171",
+    "repository": {
+      "fixture": "tests/fixtures/benchmark-repo",
+      "baseCommitSha": "f2430aa355f63bc2648776a03cf084cb9b5f3701",
+      "preparedAt": "2026-10-30T22:12:28.454Z"
+    },
+    "issue": {
+      "title": "Promo codes are accepted but silently ignored",
+      "body": "Customers can submit a promoCode when creating an order (for example WELCOME10), and the API accepts and stores it, but the discount is never applied: discountAmount is always 0 and totals are unchanged.\n\nExpected behavior:\n- A valid promo code applies its percentage discount to the order subtotal, before tax. Valid codes and their percentages are defined in the promo code registry (src/validation/promo-codes.ts), which is the single source of truth.\n- Tax is calculated on the discounted subtotal.\n- The free-shipping threshold is evaluated on the discounted subtotal.\n- Promo codes are case-insensitive.\n- An unknown promo code is rejected as a validation error (the API returns 400) and no order is stored.\n- Orders without a promo code behave exactly as they do today.\n\nAcceptance criteria:\n- A 120 order with WELCOME10 has discountAmount 12, tax 10.8, free shipping, total 118.8.\n- A 105 order with WELCOME10 pays shipping because the discounted subtotal is below the free-shipping threshold.\n- Unknown codes return HTTP 400 from the order handler.\n- All existing tests continue to pass."
+    },
+    "configuration": {
+      "modelId": "muse-wonder-1.0",
+      "subAgentModelId": "muse-wonder-1.0",
+      "transport": "responses",
+      "reasoningEffort": null,
+      "maxRepairAttempts": 2,
+      "maxModelCalls": 12,
+      "maxTotalTokens": 250000,
+      "maxCostUsd": 3,
+      "maxOutputTokensPerRequest": 8192,
+      "sandboxMode": "host",
+      "workflowEngine": "in-process-durable",
+      "intelligenceProvider": "baseline-git-inspection (no Project DNA)"
+    },
+    "intelligenceSnapshot": {
+      "repositoryId": "benchmark-baseline",
+      "analysisVersion": null,
+      "snapshotId": "benchmark-baseline@vunknown",
+      "complete": true,
+      "warnings": [
+        "Baseline condition: no Project DNA analysis was performed. File inventory from `git ls-files` only."
+      ]
+    },
+    "outcome": {
+      "finalState": "BLOCKED",
+      "error": "Task T2 failed after 2 attempt(s): delete: file not found: src/services/order-service.ts",
+      "durationMs": 228059,
+      "changedFiles": [],
+      "diffPath": "patch-B.diff",
+      "repairAttempts": 0,
+      "tasks": [
+        {
+          "taskId": "T1",
+          "status": "completed",
+          "changedPaths": [
+            "src/validation/order-validator.ts"
+          ],
+          "attempts": 1,
+          "patchSummary": "Hypothesis: File is missing global tax helper",
+          "error": null
+        },
+        {
+          "taskId": "T2",
+          "status": "failed",
+          "changedPaths": [],
+          "attempts": 2,
+          "patchSummary": null,
+          "error": "delete: file not found: src/services/order-service.ts"
+        }
+      ],
+      "plannedScope": [
+        "src/validation/order-validator.ts",
+        "src/services/order-service.ts"
+      ],
+      "nominatedTargets": [],
+      "baselineChecks": [
+        {
+          "kind": "test",
+          "status": "passed",
+          "exitCode": 0
+        },
+        {
+          "kind": "typecheck",
+          "status": "not-executed",
+          "exitCode": null
+        },
+        {
+          "kind": "lint",
+          "status": "not-executed",
+          "exitCode": null
+        }
+      ],
+      "verificationChecks": [],
+      "verifierVerdict": null
+    },
+    "usage": {
+      "modelCalls": 3,
+      "calls": [
+        {
+          "method": "analyzeAndPlan",
+          "inputTokens": 2672,
+          "outputTokens": 4667,
+          "totalTokens": 7339
+        },
+        {
+          "method": "generatePatch",
+          "inputTokens": 919,
+          "outputTokens": 4377,
+          "totalTokens": 5296
+        },
+        {
+          "method": "generatePatch",
+          "inputTokens": 1056,
+          "outputTokens": 7562,
+          "totalTokens": 8618
+        }
+      ],
+      "inputTokens": 4647,
+      "outputTokens": 16606,
+      "totalTokens": 21253,
+      "budgetExceeded": false,
+      "pricing": {
+        "currency": "USD",
+        "inputPerMillion": 4,
+        "outputPerMillion": 20,
+        "source": "dev.meta.ai/docs/pricing-rate-limits (Muse Wonder Standard, checked 2026-10-31)"
+      },
+      "estimatedCostUsd": 0.3507
+    },
+    "scoring": {
+      "acceptance": [
+        {
+          "id": "A1",
+          "passed": false,
+          "evidence": "not ok 1 - A1: WELCOME10 applies 10% before tax; free shipping evaluated after discount (>=100)"
+        },
+        {
+          "id": "A2",
+          "passed": false,
+          "evidence": "not ok 2 - A2: discounted subtotal below 100 pays shipping (threshold is post-discount)"
+        },
+        {
+          "id": "A3",
+          "passed": false,
+          "evidence": "not ok 3 - A3: unknown promo code is rejected and no order is stored"
+        },
+        {
+          "id": "A4",
+          "passed": false,
+          "evidence": "not ok 4 - A4: STUDENT5 applies 5% and stored order matches response totals"
+        },
+        {
+          "id": "A5",
+          "passed": true,
+          "evidence": "ok 5 - A5: promo code does not change orders without a promo code (regression)"
+        }
+      ],
+      "regressionPassed": true,
+      "regressionExitCode": 0,
+      "acceptanceExitCode": 1,
+      "precision": null,
+      "recall": 0,
+      "recallDetail": "recall = 0.5 for changing src/services/order-service.ts + 0.5 for A3 (unknown-code rejection) passing, so alternative validation locations are scored fairly",
+      "relevantChanged": [],
+      "unrelatedChanged": [],
+      "missingRequired": [
+        "src/services/order-service.ts (core fix)",
+        "unknown-promo rejection behavior (validator/service/handler)"
+      ]
+    },
+    "createdAt": "2026-10-30T22:12:28.454Z"
+  },
+  "dnaAware": {
+    "experimentId": "pilot-2026-10-30T22-04-58-288Z",
+    "experimentVersion": "eval-v1.1",
+    "condition": "dna-aware",
+    "executionOrder": 1,
+    "runId": "run_b8735ba2-482",
+    "repository": {
+      "fixture": "tests/fixtures/benchmark-repo",
+      "baseCommitSha": "f2430aa355f63bc2648776a03cf084cb9b5f3701",
+      "preparedAt": "2026-10-30T22:08:38.742Z"
+    },
+    "issue": {
+      "title": "Promo codes are accepted but silently ignored",
+      "body": "Customers can submit a promoCode when creating an order (for example WELCOME10), and the API accepts and stores it, but the discount is never applied: discountAmount is always 0 and totals are unchanged.\n\nExpected behavior:\n- A valid promo code applies its percentage discount to the order subtotal, before tax. Valid codes and their percentages are defined in the promo code registry (src/validation/promo-codes.ts), which is the single source of truth.\n- Tax is calculated on the discounted subtotal.\n- The free-shipping threshold is evaluated on the discounted subtotal.\n- Promo codes are case-insensitive.\n- An unknown promo code is rejected as a validation error (the API returns 400) and no order is stored.\n- Orders without a promo code behave exactly as they do today.\n\nAcceptance criteria:\n- A 120 order with WELCOME10 has discountAmount 12, tax 10.8, free shipping, total 118.8.\n- A 105 order with WELCOME10 pays shipping because the discounted subtotal is below the free-shipping threshold.\n- Unknown codes return HTTP 400 from the order handler.\n- All existing tests continue to pass."
+    },
+    "configuration": {
+      "modelId": "muse-wonder-1.0",
+      "subAgentModelId": "muse-wonder-1.0",
+      "transport": "responses",
+      "reasoningEffort": null,
+      "maxRepairAttempts": 2,
+      "maxModelCalls": 12,
+      "maxTotalTokens": 250000,
+      "maxCostUsd": 3,
+      "maxOutputTokensPerRequest": 8192,
+      "sandboxMode": "host",
+      "workflowEngine": "in-process-durable",
+      "intelligenceProvider": "project-dna"
+    },
+    "intelligenceSnapshot": {
+      "repositoryId": "2375d040a94c8eb675f3b57db25dbd3b315a0967d545f8efdbde187963294107",
+      "analysisVersion": 1,
+      "snapshotId": "2375d040a94c8eb675f3b57db25dbd3b315a0967d545f8efdbde187963294107@v1",
+      "complete": true,
+      "warnings": []
+    },
+    "outcome": {
+      "finalState": "BLOCKED",
+      "error": "Task T2 failed after 2 attempt(s): Muse Wonder returned no text output for dnafix_patch",
+      "durationMs": 218222,
+      "changedFiles": [],
+      "diffPath": "patch-A.diff",
+      "repairAttempts": 0,
+      "tasks": [
+        {
+          "taskId": "T1",
+          "status": "completed",
+          "changedPaths": [
+            "src/validation/order-validator.ts"
+          ],
+          "attempts": 1,
+          "patchSummary": "Reject unknown promo codes during order validation by consulting the promo code registry.",
+          "error": null
+        },
+        {
+          "taskId": "T2",
+          "status": "failed",
+          "changedPaths": [],
+          "attempts": 2,
+          "patchSummary": null,
+          "error": "Muse Wonder returned no text output for dnafix_patch"
+        }
+      ],
+      "plannedScope": [
+        "src/validation/order-validator.ts",
+        "src/services/order-service.ts"
+      ],
+      "nominatedTargets": [],
+      "baselineChecks": [
+        {
+          "kind": "test",
+          "status": "passed",
+          "exitCode": 0
+        },
+        {
+          "kind": "typecheck",
+          "status": "not-executed",
+          "exitCode": null
+        },
+        {
+          "kind": "lint",
+          "status": "not-executed",
+          "exitCode": null
+        }
+      ],
+      "verificationChecks": [],
+      "verifierVerdict": null
+    },
+    "usage": {
+      "modelCalls": 2,
+      "calls": [
+        {
+          "method": "analyzeAndPlan",
+          "inputTokens": 3033,
+          "outputTokens": 5052,
+          "totalTokens": 8085
+        },
+        {
+          "method": "generatePatch",
+          "inputTokens": 918,
+          "outputTokens": 3116,
+          "totalTokens": 4034
+        }
+      ],
+      "inputTokens": 3951,
+      "outputTokens": 8168,
+      "totalTokens": 12119,
+      "budgetExceeded": false,
+      "pricing": {
+        "currency": "USD",
+        "inputPerMillion": 4,
+        "outputPerMillion": 20,
+        "source": "dev.meta.ai/docs/pricing-rate-limits (Muse Wonder Standard, checked 2026-10-31)"
+      },
+      "estimatedCostUsd": 0.1792
+    },
+    "scoring": {
+      "acceptance": [
+        {
+          "id": "A1",
+          "passed": false,
+          "evidence": "not ok 1 - A1: WELCOME10 applies 10% before tax; free shipping evaluated after discount (>=100)"
+        },
+        {
+          "id": "A2",
+          "passed": false,
+          "evidence": "not ok 2 - A2: discounted subtotal below 100 pays shipping (threshold is post-discount)"
+        },
+        {
+          "id": "A3",
+          "passed": false,
+          "evidence": "not ok 3 - A3: unknown promo code is rejected and no order is stored"
+        },
+        {
+          "id": "A4",
+          "passed": false,
+          "evidence": "not ok 4 - A4: STUDENT5 applies 5% and stored order matches response totals"
+        },
+        {
+          "id": "A5",
+          "passed": true,
+          "evidence": "ok 5 - A5: promo code does not change orders without a promo code (regression)"
+        }
+      ],
+      "regressionPassed": true,
+      "regressionExitCode": 0,
+      "acceptanceExitCode": 1,
+      "precision": null,
+      "recall": 0,
+      "recallDetail": "recall = 0.5 for changing src/services/order-service.ts + 0.5 for A3 (unknown-code rejection) passing, so alternative validation locations are scored fairly",
+      "relevantChanged": [],
+      "unrelatedChanged": [],
+      "missingRequired": [
+        "src/services/order-service.ts (core fix)",
+        "unknown-promo rejection behavior (validator/service/handler)"
+      ]
+    },
+    "createdAt": "2026-10-30T22:08:38.742Z"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "reviewer": {
+    "provider": "meta",
+    "modelId": "muse-spark-1.3",
+    "note": "AI review is supplementary; deterministic acceptance/regression results are authoritative."
+  },
+  "rubric": [
+    "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+    "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+    "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+    "Promo codes are case-insensitive.",
+    "Orders without a promo code behave exactly as before; no existing behavior regresses."
+  ],
+  "anonymizationScrubPassed": true,
+  "mappingSealedUntilReviewCompleted": true,
+  "reviews": {
+    "A": {
+      "summary": "Cannot approve: checks[] is empty with no execution evidence, and diff for src/validation/order-validator.ts only evidences unknown-code validation, with no evidenced discount, tax, shipping, case-insensitivity, or regression logic.",
+      "verdict": "uncertain",
+      "criteria": [
+        {
+          "criterion": "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+          "status": "uncertain",
+          "evidence": "checks[] is empty so no execution evidence. Diff for src/validation/order-validator.ts shows only type-check and unknown-code rejection via lookupPromoPercent; no discount/tax/shipping/total calculation is shown. Hypothesis: discount application not evidenced."
+        },
+        {
+          "criterion": "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+          "status": "uncertain",
+          "evidence": "checks[] is empty so no execution evidence. Diff for src/validation/order-validator.ts contains no shipping-threshold logic. Hypothesis: threshold on discounted subtotal not evidenced."
+        },
+        {
+          "criterion": "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+          "status": "uncertain",
+          "evidence": "Diff for src/validation/order-validator.ts does add throw OrderValidationError for lookupPromoPercent===null, but checks[] has no API 400 or storage test, and no mapping from OrderValidationError to HTTP 400 / no-store guarantee is evidenced. Hypothesis: partial implementation without verification."
+        },
+        {
+          "criterion": "Promo codes are case-insensitive.",
+          "status": "uncertain",
+          "evidence": "checks[] is empty. Diff for src/validation/order-validator.ts delegates to lookupPromoPercent but its implementation is not shown in evidence, so case handling is unevidenced. Hypothesis: case-insensitivity not verifiable."
+        },
+        {
+          "criterion": "Orders without a promo code behave exactly as before; no existing behavior regresses.",
+          "status": "uncertain",
+          "evidence": "checks[] is empty so no regression execution evidence. changedPaths[] and predictedPaths[] are empty, and diff for src/validation/order-validator.ts alone does not prove no regression. Hypothesis: no regression proof."
+        }
+      ],
+      "unintendedChanges": [],
+      "missingTests": [
+        "valid WELCOME10 on 120 verifying discount 12, tax 10.8, shipping 0, total 118.8",
+        "105 + WELCOME10 verifying shipping 9.95 on discounted subtotal",
+        "unknown promo code verifying API 400 and no order stored",
+        "case-insensitive promo code (e.g., welcome10 vs WELCOME10)",
+        "no-promo regression test verifying prior behavior unchanged"
+      ],
+      "usageAfterCall": {
+        "inputTokens": 3976,
+        "outputTokens": 2976,
+        "totalTokens": 6952
+      }
+    },
+    "B": {
+      "summary": "Cannot approve: checks=[] provides no execution evidence and decoded diff (hypothesis) shows deletion of src/validation/order-validator.ts with no promo discount logic; changedPaths=[] confirms no verified implementation.",
+      "verdict": "request-changes",
+      "criteria": [
+        {
+          "criterion": "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+          "status": "uncertain",
+          "evidence": "checks=[] so no execution evidence. Hypothesis: decoded diff shows only deletion of src/validation/order-validator.ts with no discount/tax/total logic; changedPaths=[] shows no implementation. Satisfaction cannot be confirmed."
+        },
+        {
+          "criterion": "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+          "status": "uncertain",
+          "evidence": "checks=[] so no execution evidence. Hypothesis: decoded diff shows deletion of src/validation/order-validator.ts and no shipping-threshold logic; changedPaths=[] . Cannot confirm."
+        },
+        {
+          "criterion": "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+          "status": "uncertain",
+          "evidence": "checks=[] so no execution evidence. Hypothesis: decoded diff shows deletion of src/validation/order-validator.ts including its INVALID_PROMO check, which would remove rejection rather than add it. Cannot confirm correct rejection."
+        },
+        {
+          "criterion": "Promo codes are case-insensitive.",
+          "status": "uncertain",
+          "evidence": "checks=[] so no execution evidence. Hypothesis: decoded diff contains no case-normalization logic; changedPaths=[] . Cannot confirm."
+        },
+        {
+          "criterion": "Orders without a promo code behave exactly as before; no existing behavior regresses.",
+          "status": "uncertain",
+          "evidence": "checks=[] so no execution evidence. Hypothesis: decoded diff deletes src/validation/order-validator.ts which contained customerId/items validation, indicating regression risk. No regression test evidence supplied."
+        }
+      ],
+      "unintendedChanges": [
+        "Hypothesis: diff indicates deleted file src/validation/order-validator.ts removing existing validation"
+      ],
+      "missingTests": [
+        "Valid promo 120 + WELCOME10 expecting discount 12, tax 10.8, shipping 0, total 118.8",
+        "Discounted-subtotal shipping threshold 105 + WELCOME10 expecting shipping 9.95",
+        "Unknown promo rejected with API 400 and no order stored",
+        "Case-insensitivity test e.g. welcome10 vs WELCOME10",
+        "No-promo regression test for unchanged totals"
+      ],
+      "usageAfterCall": {
+        "inputTokens": 6177,
+        "outputTokens": 2730,
+        "totalTokens": 8907
+      }
+    }
+  },
+  "reviewedAt": "2026-10-30T22:14:51.799Z"
+}

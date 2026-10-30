@@ -1,0 +1,109 @@
+{
+  "reviewer": {
+    "provider": "meta",
+    "modelId": "muse-spark-1.3",
+    "note": "AI review is supplementary; deterministic acceptance/regression results are authoritative."
+  },
+  "rubric": [
+    "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+    "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+    "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+    "Promo codes are case-insensitive.",
+    "Orders without a promo code behave exactly as before; no existing behavior regresses."
+  ],
+  "anonymizationScrubPassed": true,
+  "mappingSealedUntilReviewCompleted": true,
+  "reviews": {
+    "A": {
+      "summary": "Diff deletes src/services/order-service.ts instead of fixing promo application, with only a partial validator change referencing unverified isKnownPromoCode and zero test evidence in checks. Core discount, tax/shipping on discounted subtotal, and no-regression criteria cannot be satisfied.",
+      "verdict": "request-changes",
+      "criteria": [
+        {
+          "criterion": "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+          "status": "not-satisfied",
+          "evidence": "Factual: diff deletes entire src/services/order-service.ts with no replacement implementation; prior discountAmount=0 logic removed and no new discount calculation added in supplied evidence. checks=[] provides no execution evidence of 12/10.8/0/118.8. Hypothesis: order creation is broken, discount cannot be applied."
+        },
+        {
+          "criterion": "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+          "status": "not-satisfied",
+          "evidence": "Factual: diff deletes src/services/order-service.ts which contained shippingFee(subtotal) call; no new shippingFee(discountedSubtotal) logic appears in supplied evidence. checks=[] provides no execution evidence. Hypothesis: threshold behavior cannot be verified and is removed with file deletion."
+        },
+        {
+          "criterion": "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+          "status": "uncertain",
+          "evidence": "Factual: src/validation/order-validator.ts hunk adds throw OrderValidationError INVALID_PROMO for !isKnownPromoCode(input.promoCode), but supplied evidence shows no definition/import of isKnownPromoCode and no API mapping or persistence test. checks=[] provides no execution evidence of 400 or no-store. Hypothesis: intent present but end-to-end rejection unverified and undermined by service deletion."
+        },
+        {
+          "criterion": "Promo codes are case-insensitive.",
+          "status": "uncertain",
+          "evidence": "Factual: validator hunk calls isKnownPromoCode(input.promoCode) with no visible case normalization; prior toUpperCase storage in src/services/order-service.ts was deleted with file. No definition of isKnownPromoCode in evidence and checks=[] provides no execution evidence. Hypothesis: case-insensitivity cannot be confirmed."
+        },
+        {
+          "criterion": "Orders without a promo code behave exactly as before; no existing behavior regresses.",
+          "status": "not-satisfied",
+          "evidence": "Factual: diff deletes entire src/services/order-service.ts, removing all baseline createOrder/getOrder logic. checks=[] provides no regression execution evidence. Hypothesis: deletion is a total regression for orders with and without promo."
+        }
+      ],
+      "unintendedChanges": [
+        "Deletion of entire src/services/order-service.ts (removes createOrder/getOrder, subtotal/tax/shipping/total logic)"
+      ],
+      "missingTests": [
+        "Test 120 + WELCOME10 yields discount 12, tax 10.8, shipping 0, total 118.8",
+        "Test 105 + WELCOME10 yields shipping 9.95 on discounted subtotal",
+        "Test unknown promo yields API 400 validation error and no order persisted",
+        "Test promo code case-insensitivity e.g. welcome10 / Welcome10",
+        "Test order without promo code unchanged regression suite"
+      ],
+      "usageAfterCall": {
+        "inputTokens": 1179,
+        "outputTokens": 2907,
+        "totalTokens": 4086
+      }
+    },
+    "B": {
+      "summary": "Fact: no changes were produced and no checks exist, so promo-code behavior is unverified and unimplemented. Hypothesis: all discount/validation criteria remain unmet.",
+      "verdict": "request-changes",
+      "criteria": [
+        {
+          "criterion": "A valid promo code applies its percentage discount to the subtotal before tax (120 + WELCOME10 => discount 12, tax 10.8, shipping 0, total 118.8).",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: with no code change, no discount logic can exist to produce the required totals."
+        },
+        {
+          "criterion": "The free-shipping threshold ($100) is evaluated on the discounted subtotal (105 + WELCOME10 => shipping 9.95 charged).",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: with no code change, shipping cannot be re-evaluated on discounted subtotal."
+        },
+        {
+          "criterion": "Unknown promo codes are rejected as validation errors (API 400) and no order is stored.",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: with no code change, no validation for unknown codes can exist."
+        },
+        {
+          "criterion": "Promo codes are case-insensitive.",
+          "status": "not-satisfied",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: with no code change, no case-insensitive handling can exist."
+        },
+        {
+          "criterion": "Orders without a promo code behave exactly as before; no existing behavior regresses.",
+          "status": "uncertain",
+          "evidence": "Fact: diff is \"(empty patch — no changes were produced)\" and checks is []. Hypothesis: empty patch suggests no behavior change, but with checks empty there is no execution evidence to confirm no regression."
+        }
+      ],
+      "unintendedChanges": [],
+      "missingTests": [
+        "Valid promo 120 + WELCOME10 expecting discount 12, tax 10.8, shipping 0, total 118.8",
+        "Discounted-subtotal shipping 105 + WELCOME10 expecting shipping 9.95 charged",
+        "Unknown promo code expecting API 400 and no order stored",
+        "Case-insensitive promo code handling",
+        "Orders without promo code regression check"
+      ],
+      "usageAfterCall": {
+        "inputTokens": 476,
+        "outputTokens": 2797,
+        "totalTokens": 3273
+      }
+    }
+  },
+  "reviewedAt": "2026-10-30T22:00:53.496Z"
+}

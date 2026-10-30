@@ -1,0 +1,5 @@
+{
+  "title": "Percentage discounts are calculated as flat amounts",
+  "body": "Bug: a 10% discount on a 200 item charges 190 instead of 180. `applyDiscount(price, percentOff)` in src/discount.ts subtracts the percentage number as a flat currency amount. Expected: it returns price reduced by percentOff percent. Acceptance: applyDiscount(200, 10) === 180, applyDiscount(50, 100) === 0, and the existing test suite passes.",
+  "number": 1
+}
