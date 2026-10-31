@@ -1,0 +1,3 @@
+[submodule "vendor/Project-DNA"]
+	path = vendor/Project-DNA
+	url = https://github.com/dinitheth/Project-DNA

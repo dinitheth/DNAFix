@@ -1,7 +1,21 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RepositoryIntelligenceReportSchema, type RepositoryIntelligenceReport } from "@dnafix/contracts";
+
+/**
+ * Default Project DNA location resolution:
+ * 1. PROJECT_DNA_PATH (explicit, always wins)
+ * 2. vendor/Project-DNA git submodule at the DNAFix repository root
+ * Project DNA is consumed only through its public IProjectDNAService API;
+ * its source is never copied into DNAFix packages (ADR-0002).
+ */
+export function resolveProjectDnaPath(explicit = process.env.PROJECT_DNA_PATH ?? ""): string {
+  if (explicit) return explicit;
+  const candidate = path.resolve(process.cwd(), "vendor", "Project-DNA");
+  return existsSync(path.join(candidate, "packages", "dna-core", "src", "index.ts")) ? candidate : "";
+}
 
 export class RepositoryIntelligenceError extends Error {
   constructor(message: string) {
@@ -26,7 +40,7 @@ const BRIDGE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), ".."
 export class ProjectDNAAdapter implements RepositoryIntelligence {
   readonly providerName = "project-dna";
   constructor(
-    private readonly projectDnaPath = process.env.PROJECT_DNA_PATH ?? "",
+    private readonly projectDnaPath = resolveProjectDnaPath(),
     private readonly timeoutMs = Number(process.env.PROJECT_DNA_TIMEOUT_MS ?? 600_000),
   ) {}
 

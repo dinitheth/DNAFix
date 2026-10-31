@@ -423,7 +423,7 @@ Copy `.env.example` to `.env`. No real secrets are ever committed; `.env` is git
 
 - Node.js **22.23.2** (pinned in `.nvmrc` and `engines`; Project DNA requires `>=22.23.2 <23`) and pnpm **9.15.4** via corepack
 - Git
-- A Project DNA checkout for repository analysis: `git clone https://github.com/dinitheth/Project-DNA` (sibling directory), `pnpm install` there under Node 22
+- Project DNA for repository analysis: vendored as a git submodule at `vendor/Project-DNA` (clone with `--recurse-submodules`, then `pnpm install` inside it under Node 22). DNAFix consumes it only through its public API; no Project DNA source is copied into DNAFix packages.
 - Optional: Docker (sandbox/Temporal/Postgres), a Meta API key, a GitHub App
 
 ### Install and run

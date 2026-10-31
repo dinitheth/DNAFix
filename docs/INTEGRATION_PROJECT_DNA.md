@@ -25,13 +25,16 @@ node --import tsx packages/repository-intelligence/bridge/project-dna-bridge.ts
 
 ## Setup
 
+Project DNA is vendored as a **git submodule** at `vendor/Project-DNA` (pinned at `c8454b9`, the commit inspected for this integration). It remains an independent repository with its own history; DNAFix consumes it only through the public service API — no Project DNA source files are copied into DNAFix packages.
+
 ```bash
-# sibling checkout, kept independent
-git clone https://github.com/dinitheth/Project-DNA ../Project-DNA
-cd ../Project-DNA && nvm use 22.23.2 && corepack pnpm install
-# DNAFix .env
-PROJECT_DNA_PATH=C:\path\to\Project-DNA
+git clone --recurse-submodules https://github.com/dinitheth/DNAFix
+# or, in an existing clone:
+git submodule update --init
+cd vendor/Project-DNA && nvm use 22.23.2 && corepack pnpm install
 ```
+
+Path resolution (`resolveProjectDnaPath` in `packages/repository-intelligence/src/index.ts`): `PROJECT_DNA_PATH` when set, otherwise the `vendor/Project-DNA` submodule at the repository root. To use a different Project DNA checkout, set `PROJECT_DNA_PATH` explicitly.
 
 ## Verification status
 
