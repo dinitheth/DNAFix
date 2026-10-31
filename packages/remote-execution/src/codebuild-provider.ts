@@ -6,7 +6,8 @@ import { idempotencyTokenFor, validateManifest, type ExecutionCommand, type Exec
 import { isTerminalStatus, mapBuildStatus, parseCheckMarkers, type ExecutionStatus } from "./status.js";
 import type { AwsClients } from "./aws-operations.js";
 import { createAwsClients } from "./aws-operations.js";
-import { RunRoleManager } from "./run-role.js";
+import { RunRoleManager, type RoleCleanupRecord } from "./run-role.js";
+import { createHash } from "node:crypto";
 
 /**
  * Remote execution port. Domain/orchestration code depends only on this
@@ -41,15 +42,18 @@ export interface RemoteJobResult {
   checkResults: RemoteCheckResult[];
   summary: string;
   durationMs: number;
-  /** Per-run scoped IAM role used for this build, and whether cleanup deleted it. */
-  executionRole?: { arn: string; deleted: boolean } | null;
+  /** Full per-run role cleanup record (revocation + deletion + containment). */
+  executionRole?: RoleCleanupRecord | null;
+  sourceVerified?: boolean;
+  sourceVersionId?: string | null;
+  artifactIntegrity?: { location: string; sha256: string | null; verified: boolean; error: string | null } | null;
 }
 
 export interface RemoteExecutionProvider {
   readonly name: string;
   configured(): boolean;
   runJob(spec: RemoteJobSpec): Promise<RemoteJobResult>;
-  cancel(jobId: string): Promise<void>;
+  cancel(jobId: string): Promise<{ status: string }>;
 }
 
 export interface CodeBuildConfig {
@@ -92,8 +96,9 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
     return Boolean(this.config.region && this.config.projectName && this.config.artifactsBucket);
   }
 
-  async cancel(jobId: string): Promise<void> {
-    await this.clients.codebuild.stopBuild(jobId);
+  /** Requests StopBuild and returns the status CodeBuild reports (the build may already have completed — races are reported, not assumed). */
+  async cancel(jobId: string): Promise<{ status: string }> {
+    return this.clients.codebuild.stopBuild(jobId);
   }
 
   async runJob(spec: RemoteJobSpec): Promise<RemoteJobResult> {
@@ -132,13 +137,23 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       durationMs: 0,
     };
 
+    const checksumBase64 = Buffer.from(bundle.sha256, "hex").toString("base64");
     await this.clients.s3.putObject({
       bucket: this.config.artifactsBucket,
       key: keys.sourceKey,
       body: await readFile(bundle.zipPath),
       contentType: "application/zip",
       metadata: { sha256: bundle.sha256, runid: spec.runId },
+      checksumSha256Base64: checksumBase64,
     });
+    // Integrity: an upload acknowledgement is not proof. Verify the stored object.
+    const head = await this.clients.s3.headObject({ bucket: this.config.artifactsBucket, key: keys.sourceKey });
+    const sourceVerified = head.metadataSha256 === bundle.sha256 || head.checksumSha256 === checksumBase64;
+    if (!sourceVerified) {
+      throw new Error(`Source integrity verification failed for ${keys.sourceKey}: expected SHA-256 ${bundle.sha256}, S3 reports metadata=${head.metadataSha256} checksum=${head.checksumSha256}`);
+    }
+    base.sourceVerified = true;
+    base.sourceVersionId = head.versionId;
     await this.clients.s3.putObject({
       bucket: this.config.artifactsBucket,
       key: keys.manifestKey,
@@ -146,10 +161,16 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       contentType: "application/json",
       metadata: { runid: spec.runId },
     });
+    // Manifest integrity: re-read and validate the stored manifest against this run.
+    const storedManifest = validateManifest(JSON.parse(await this.clients.s3.getObjectText({ bucket: this.config.artifactsBucket, key: keys.manifestKey })) as unknown);
+    if (storedManifest.runId !== spec.runId || storedManifest.sourceSha256 !== bundle.sha256) {
+      throw new Error(`Manifest integrity verification failed for ${keys.manifestKey}: stored runId/sourceSha256 do not match this run`);
+    }
+    base.sourceVerified = true;
 
     // Per-run scoped execution role. Failure here aborts the job: DNAFix never
     // falls back to the shared project role for untrusted code execution.
-    let runRole: { roleName: string; arn: string } | null = null;
+    let cleanupRecord: RoleCleanupRecord | null = null;
     let roleManager: RunRoleManager | null = null;
     if (this.config.perRunRoles !== false) {
       if (!this.config.accountId) {
@@ -162,10 +183,12 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
           region: this.config.region,
           accountId: this.config.accountId,
           logGroupName: this.config.logGroupName,
+          projectName: this.config.projectName,
         },
         Number(process.env.DNAFIX_ROLE_PROPAGATION_MS ?? 8_000),
       );
-      runRole = await roleManager.createRunRole(spec.runId);
+      const created = await roleManager.createRunRole(spec.runId);
+      cleanupRecord = created.record;
     }
 
     const { buildId } = await this.clients.codebuild.startBuild({
@@ -176,16 +199,17 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       artifactsPath: `runs/${spec.runId}/artifacts`,
       timeoutInMinutes: manifest.timeoutMinutes,
       idempotencyToken: idempotencyTokenFor(spec.runId, bundle.sha256),
-      ...(runRole ? { serviceRoleArn: runRole.arn } : {}),
+      ...(cleanupRecord?.roleArn ? { serviceRoleArn: cleanupRecord.roleArn } : {}),
     }).catch(async (err: Error) => {
-      if (runRole && roleManager) await roleManager.deleteRunRole(runRole.roleName);
+      if (cleanupRecord && roleManager) await roleManager.quarantine(cleanupRecord);
       throw err;
     });
     base.jobId = buildId;
-    const cleanupRole = async (): Promise<boolean> => {
-      if (!runRole || !roleManager) return true;
-      const deleted = await roleManager.deleteRunRole(runRole.roleName);
-      return deleted;
+    // Unified containment: every termination path quarantines the role
+    // (deny-assume + deny-all + session revocation). Deletion is deferred to
+    // the reaper after deleteNotBefore — never immediate.
+    const cleanupRole = async (): Promise<void> => {
+      if (cleanupRecord && roleManager) await roleManager.quarantine(cleanupRecord);
     };
 
     const deadline = Date.now() + (this.pollTimeoutMs ?? (manifest.timeoutMinutes + 2) * 60_000);
@@ -198,7 +222,7 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       if (isTerminalStatus(status)) break;
       if (Date.now() > deadline) {
         await this.clients.codebuild.stopBuild(buildId).catch(() => undefined);
-        const deleted = await cleanupRole();
+        await cleanupRole();
         return {
           ...base,
           status: "TIMED_OUT",
@@ -206,7 +230,7 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
           logsReference: build.logsDeepLink,
           summary: `Poll deadline (${manifest.timeoutMinutes + 2} min) exceeded; stop requested for build ${buildId}.`,
           durationMs: Date.now() - startedAt,
-          executionRole: runRole ? { arn: runRole.arn, deleted } : null,
+          executionRole: cleanupRecord,
         };
       }
       await sleep(this.pollIntervalMs);
@@ -231,7 +255,31 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
     }
     const markers = parseCheckMarkers(logText);
     const checkResults = spec.commands.map((c) => ({ id: c.id, kind: c.kind, exitCode: markers.get(c.id) ?? null }));
-    const roleDeleted = await cleanupRole();
+
+    // Artifact integrity: retrieve the produced artifact, confine it to this
+    // run's prefix (cross-run artifacts are rejected), and hash it.
+    let artifactIntegrity: RemoteJobResult["artifactIntegrity"] = null;
+    if (build!.artifactsLocation) {
+      const location = build!.artifactsLocation.replace(/^arn:aws:s3:::/, "");
+      const slash = location.indexOf("/");
+      const artifactBucket = slash > 0 ? location.slice(0, slash) : this.config.artifactsBucket;
+      const artifactKey = slash > 0 ? location.slice(slash + 1) : location;
+      try {
+        if (artifactBucket !== this.config.artifactsBucket || !artifactKey.startsWith(`runs/${spec.runId}/artifacts`)) {
+          throw new Error(`artifact location ${location} is outside runs/${spec.runId}/artifacts (possible cross-run artifact)`);
+        }
+        const bytes = await this.clients.s3.getObjectBytes({ bucket: artifactBucket, key: artifactKey });
+        artifactIntegrity = { location, sha256: createHash("sha256").update(bytes).digest("hex"), verified: true, error: null };
+      } catch (err) {
+        artifactIntegrity = { location, sha256: null, verified: false, error: err instanceof Error ? err.message : String(err) };
+        if (status === "SUCCEEDED") status = "FAILED";
+      }
+    } else if (status === "SUCCEEDED") {
+      artifactIntegrity = { location: "", sha256: null, verified: false, error: "build succeeded but produced no artifact location" };
+      status = "FAILED";
+    }
+
+    await cleanupRole();
     return {
       ...base,
       status,
@@ -241,9 +289,10 @@ export class CodeBuildExecutionProvider implements RemoteExecutionProvider {
       checkResults,
       summary: logsError
         ? `CodeBuild status: ${build!.status}; log retrieval failed: ${logsError}`
-        : `CodeBuild status: ${build!.status}; checks: ${checkResults.map((c) => `${c.id}=${c.exitCode ?? "unknown"}`).join(", ")}`,
+        : `CodeBuild status: ${build!.status}; checks: ${checkResults.map((c) => `${c.id}=${c.exitCode ?? "unknown"}`).join(", ")}${artifactIntegrity && !artifactIntegrity.verified ? `; artifact integrity FAILED: ${artifactIntegrity.error}` : ""}`,
       durationMs: Date.now() - startedAt,
-      executionRole: runRole ? { arn: runRole.arn, deleted: roleDeleted } : null,
+      executionRole: cleanupRecord,
+      artifactIntegrity,
     };
   }
 }

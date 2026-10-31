@@ -114,6 +114,23 @@ export class RunService {
     return run;
   }
 
+  /**
+   * Request remote cancellation: StopBuild for the run's active build, persist
+   * the request and CodeBuild's reported status. A submitted stop request is
+   * never reported as safe termination — the worker observing the terminal
+   * state (and completing role revocation/cleanup) is the authority.
+   */
+  async requestRemoteCancellation(run: RunRecord): Promise<void> {
+    const remote = this.deps.remoteExecution;
+    const active = [...(run.remoteExecutions ?? [])].reverse().find((e) => e.buildId && !["SUCCEEDED", "FAILED", "FAULT", "TIMED_OUT", "STOPPED"].includes(e.status));
+    if (!remote || !active?.buildId) return;
+    const reported = await remote.cancel(active.buildId).catch((err: Error) => ({ status: `stop-request-failed: ${err.message}` }));
+    active.cancellation = { requestedAt: new Date().toISOString(), reportedStatus: reported.status, outcome: "stop-requested; terminal state to be confirmed by the executing worker" };
+    run.remoteExecutions = [...(run.remoteExecutions ?? [])];
+    await this.save(run);
+    await this.audit(run.id, run.repositoryId, "user", "execution.codebuild.cancel-requested", "info", `build=${active.buildId} reportedStatus=${reported.status}`);
+  }
+
   async audit(runId: string | null, repositoryId: string | null, actor: AuditEvent["actor"], action: string, result: AuditEvent["result"], evidence: string | null): Promise<void> {
     await this.deps.store.appendAudit({ id: id("evt"), runId, repositoryId, actor, action, result, evidence, createdAt: now() });
   }
@@ -192,6 +209,17 @@ export class Pipeline {
         logsReference: result.logsReference,
         summary: result.summary,
         createdAt: new Date().toISOString(),
+        roleArn: result.executionRole?.roleArn ?? null,
+        trustPolicyVersion: result.executionRole?.trustPolicyVersion ?? null,
+        revocationStatus: result.executionRole ? result.executionRole.revocation.confirmationStatus : null,
+        deletionStatus: result.executionRole ? (result.executionRole.deletion.deleted ? "deleted" : "not-deleted") : null,
+        containmentStatus: result.executionRole?.containmentStatus ?? null,
+        lifecycleState: result.executionRole?.lifecycleState ?? null,
+        quarantinedAt: result.executionRole?.quarantinedAt ?? null,
+        deleteNotBefore: result.executionRole?.deleteNotBefore ?? null,
+        cleanupAttempts: result.executionRole?.cleanupAttempts ?? 0,
+        sourceVerified: result.sourceVerified,
+        artifactVerified: result.artifactIntegrity?.verified,
       },
     ];
     await this.runs.audit(run.id, run.repositoryId, "system", `execution.codebuild.${phase}`, result.status === "SUCCEEDED" ? "ok" : "error", `build=${result.jobId} status=${result.status} sourceSha256=${result.sourceSha256} logs=${result.logsReference}`);

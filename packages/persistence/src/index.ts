@@ -27,10 +27,22 @@ export interface RemoteExecutionRecord {
   status: string;
   sourceKey: string | null;
   sourceSha256: string | null;
+  sourceVerified?: boolean;
   artifactsLocation: string | null;
+  artifactVerified?: boolean;
   logsReference: string | null;
   summary: string;
   createdAt: string;
+  roleArn?: string | null;
+  trustPolicyVersion?: string | null;
+  revocationStatus?: string | null;
+  deletionStatus?: string | null;
+  containmentStatus?: string | null;
+  lifecycleState?: string | null;
+  quarantinedAt?: string | null;
+  deleteNotBefore?: string | null;
+  cleanupAttempts?: number;
+  cancellation?: { requestedAt: string; reportedStatus: string; outcome: string } | null;
 }
 
 export interface TaskRecord {

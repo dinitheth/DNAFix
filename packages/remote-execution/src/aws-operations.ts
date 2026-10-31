@@ -1,7 +1,7 @@
 import { BatchGetBuildsCommand, CodeBuildClient, StartBuildCommand, StopBuildCommand } from "@aws-sdk/client-codebuild";
 import { CloudWatchLogsClient, GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { IAMClient } from "@aws-sdk/client-iam";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { SdkIamOperations, type IamOperations } from "./run-role.js";
 
 /**
@@ -34,12 +34,15 @@ export interface CodeBuildOperations {
     serviceRoleArn?: string;
   }): Promise<{ buildId: string }>;
   batchGetBuilds(ids: string[]): Promise<BuildInfo[]>;
-  stopBuild(id: string): Promise<void>;
+  /** Requests stop; returns the build's status as reported by CodeBuild (may already be terminal). */
+  stopBuild(id: string): Promise<{ status: string }>;
 }
 
 export interface S3Operations {
-  putObject(input: { bucket: string; key: string; body: Buffer | string; contentType: string; metadata?: Record<string, string> }): Promise<void>;
+  putObject(input: { bucket: string; key: string; body: Buffer | string; contentType: string; metadata?: Record<string, string>; checksumSha256Base64?: string }): Promise<void>;
   getObjectText(input: { bucket: string; key: string }): Promise<string>;
+  getObjectBytes(input: { bucket: string; key: string }): Promise<Buffer>;
+  headObject(input: { bucket: string; key: string }): Promise<{ checksumSha256: string | null; metadataSha256: string | null; versionId: string | null; contentLength: number | null }>;
 }
 
 export interface LogsOperations {
@@ -87,14 +90,15 @@ export class SdkCodeBuildOperations implements CodeBuildOperations {
       artifactsLocation: b.artifacts?.location ?? null,
     }));
   }
-  async stopBuild(id: string): Promise<void> {
-    await this.client.send(new StopBuildCommand({ id }));
+  async stopBuild(id: string): Promise<{ status: string }> {
+    const out = await this.client.send(new StopBuildCommand({ id }));
+    return { status: out.build?.buildStatus ?? "UNKNOWN" };
   }
 }
 
 export class SdkS3Operations implements S3Operations {
   constructor(private readonly client: S3Client) {}
-  async putObject(input: { bucket: string; key: string; body: Buffer | string; contentType: string; metadata?: Record<string, string> }): Promise<void> {
+  async putObject(input: { bucket: string; key: string; body: Buffer | string; contentType: string; metadata?: Record<string, string>; checksumSha256Base64?: string }): Promise<void> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: input.bucket,
@@ -103,12 +107,26 @@ export class SdkS3Operations implements S3Operations {
         ContentType: input.contentType,
         ServerSideEncryption: "AES256",
         Metadata: input.metadata,
+        ...(input.checksumSha256Base64 ? { ChecksumSHA256: input.checksumSha256Base64 } : {}),
       }),
     );
   }
   async getObjectText(input: { bucket: string; key: string }): Promise<string> {
     const out = await this.client.send(new GetObjectCommand({ Bucket: input.bucket, Key: input.key }));
     return (await out.Body?.transformToString()) ?? "";
+  }
+  async getObjectBytes(input: { bucket: string; key: string }): Promise<Buffer> {
+    const out = await this.client.send(new GetObjectCommand({ Bucket: input.bucket, Key: input.key }));
+    return Buffer.from(await out.Body!.transformToByteArray());
+  }
+  async headObject(input: { bucket: string; key: string }): Promise<{ checksumSha256: string | null; metadataSha256: string | null; versionId: string | null; contentLength: number | null }> {
+    const out = await this.client.send(new HeadObjectCommand({ Bucket: input.bucket, Key: input.key, ChecksumMode: "ENABLED" }));
+    return {
+      checksumSha256: out.ChecksumSHA256 ?? null,
+      metadataSha256: out.Metadata?.sha256 ?? null,
+      versionId: out.VersionId ?? null,
+      contentLength: out.ContentLength ?? null,
+    };
   }
 }
 

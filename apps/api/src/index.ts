@@ -123,6 +123,7 @@ app.post("/api/v1/runs/:id/cancel", async (req, reply) => {
   const run = await loadRun((req.params as { id: string }).id, reply);
   if (!run) return;
   if (["COMPLETED", "FAILED", "CANCELLED"].includes(run.state)) return reply.code(409).send({ error: `Run already ${run.state}` });
+  await runs.requestRemoteCancellation(run).catch(() => undefined);
   run.state = "CANCELLED";
   await runs.save(run);
   await runs.audit(run.id, run.repositoryId, "user", "run.cancelled", "ok", null);
@@ -139,6 +140,16 @@ app.get("/api/v1/runs/:id/verification", async (req, reply) => {
   const run = await loadRun((req.params as { id: string }).id, reply);
   if (!run) return;
   return { baselineChecks: run.baselineChecks, verificationChecks: run.verificationChecks, verifierReview: run.verifierReview, repairAttempts: run.repairAttempts };
+});
+
+/** Operator view of cloud executions incl. role quarantine/containment state and unresolved cleanups. */
+app.get("/api/v1/executions", async (req) => {
+  const { unresolved } = req.query as { unresolved?: string };
+  const runs = await deps.store.listRuns();
+  const executions = runs.flatMap((run) =>
+    (run.remoteExecutions ?? []).map((e) => ({ runId: run.id, runState: run.state, ...e })),
+  );
+  return unresolved === "true" ? executions.filter((e) => e.containmentStatus && e.containmentStatus !== "contained") : executions;
 });
 
 app.get("/api/v1/audit", async (req) => {

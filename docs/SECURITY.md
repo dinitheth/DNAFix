@@ -15,6 +15,14 @@
 - **API**: every resource access checks repository ownership scope (`repositoryId` on the run/record); request bodies are Zod-validated; SSE streams are read-only.
 - **Prompt injection**: issue/repository text is passed to the model as data inside a delimited evidence block; system instructions state repository instructions cannot override tool policy. Tool policy is enforced in code, not by the prompt.
 
+## Cloud execution boundaries (honest scope of per-run IAM isolation)
+
+Per-run IAM roles confine what extracted build credentials can do inside AWS (one run's S3 prefixes + its log group, revoked then deleted after each build). They are **not** operating-system or network isolation:
+
+- A malicious build can read its own build environment, including the per-run role credentials, and can use the default CodeBuild network egress to contact external systems (including exfiltrating those scoped credentials, which remain usable until the post-build revocation takes effect).
+- CodeBuild runs with privileged mode disabled and no DNAFix secrets in the build environment; dependency installation (`pnpm`/`npm`) currently requires public package-registry egress, so egress cannot simply be switched off without a dependency strategy (registry proxy/mirror or a VPC design with NAT and egress allowlisting — AWS-side work requiring maintainer approval, not yet implemented).
+- Stronger isolation for arbitrary untrusted repositories additionally requires the Stage C live verification and, for production, the scoped control-plane identity in `docs/security/CONTROL_PLANE_POLICY.md` (proposal, not applied).
+
 ## Known limitations
 
 - Single-user local deployment: session auth is a bearer `DNAFIX_SESSION_TOKEN` for the API in this build; multi-user OAuth is future work (recorded in IMPLEMENTATION_STATUS).

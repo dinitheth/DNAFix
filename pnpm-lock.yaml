@@ -103,9 +103,15 @@ importers:
 
   apps/worker:
     dependencies:
+      '@aws-sdk/client-iam':
+        specifier: ^3.716.0
+        version: 3.1161.0
       '@dnafix/application':
         specifier: workspace:*
         version: link:../../packages/application
+      '@dnafix/remote-execution':
+        specifier: workspace:*
+        version: link:../../packages/remote-execution
       '@temporalio/client':
         specifier: ^1.11.6
         version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)

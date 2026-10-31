@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-iam": "^3.716.0",
     "@dnafix/application": "workspace:*",
+    "@dnafix/remote-execution": "workspace:*",
     "@temporalio/client": "^1.11.6",
     "@temporalio/worker": "^1.11.6",
     "@temporalio/workflow": "^1.11.6"

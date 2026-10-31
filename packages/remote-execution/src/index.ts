@@ -5,4 +5,5 @@ export * from "./buildspec.js";
 export * from "./iam-validation.js";
 export * from "./aws-operations.js";
 export * from "./run-role.js";
+export * from "./role-reaper.js";
 export * from "./codebuild-provider.js";

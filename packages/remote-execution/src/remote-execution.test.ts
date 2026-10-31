@@ -108,6 +108,9 @@ describe("IAM policy validation", () => {
   });
 });
 
+let capturedMetadata: string | null = null;
+let capturedManifest = "{}";
+
 function fakeClients(buildSequence: BuildInfo[], logText: string, captured?: { starts: Array<Record<string, unknown>>; puts: string[]; roles: string[] }) {
   let poll = 0;
   const clients: AwsClients = {
@@ -117,13 +120,17 @@ function fakeClients(buildSequence: BuildInfo[], logText: string, captured?: { s
         return { buildId: "dnafix-build:123" };
       },
       batchGetBuilds: async () => [buildSequence[Math.min(poll++, buildSequence.length - 1)]!],
-      stopBuild: async () => undefined,
+      stopBuild: async () => ({ status: "STOPPED" }),
     },
     s3: {
       putObject: async (input) => {
         captured?.puts.push(input.key);
+        capturedMetadata = input.metadata?.sha256 ?? null;
+        if (input.contentType === "application/json") capturedManifest = String(input.body);
       },
-      getObjectText: async () => "{}",
+      getObjectText: async () => capturedManifest,
+      getObjectBytes: async () => Buffer.from("artifact-bytes"),
+      headObject: async () => ({ metadataSha256: capturedMetadata, checksumSha256: null, versionId: "v1", contentLength: 1 }),
     },
     logs: { getLogText: async () => logText },
     iam: {
@@ -131,6 +138,8 @@ function fakeClients(buildSequence: BuildInfo[], logText: string, captured?: { s
         captured?.roles.push(`create:${input.roleName}`);
         return { arn: `arn:aws:iam::121728644078:role/${input.roleName}` };
       },
+      putPolicy: async () => undefined,
+      updateTrustPolicy: async () => undefined,
       deleteRole: async (roleName) => {
         captured?.roles.push(`delete:${roleName}`);
       },
@@ -194,15 +203,49 @@ describe("CodeBuildExecutionProvider (mocked AWS clients)", () => {
     expect(stopped).toBe(true);
   });
 
-  it("cancellation uses StopBuild", async () => {
+  it("9+10. cancellation requests StopBuild and reports the actual status (incl. completion race)", async () => {
     let stoppedId: string | null = null;
     const clients = fakeClients([succeeded], "");
     clients.codebuild.stopBuild = async (id) => {
       stoppedId = id;
+      return { status: "STOPPED" };
     };
     const provider = new CodeBuildExecutionProvider(config, clients, 1);
-    await provider.cancel("dnafix-build:999");
+    expect(await provider.cancel("dnafix-build:999")).toEqual({ status: "STOPPED" });
     expect(stoppedId).toBe("dnafix-build:999");
+    // Race: the build completed just before the stop landed — reported honestly, not as "stopped".
+    clients.codebuild.stopBuild = async () => ({ status: "SUCCEEDED" });
+    expect(await provider.cancel("dnafix-build:999")).toEqual({ status: "SUCCEEDED" });
+  });
+
+  it("11. persists the full cleanup record (revocation + deletion + containment) in the result", async () => {
+    const provider = new CodeBuildExecutionProvider(config, fakeClients([succeeded], "DNAFIX_CHECK_END test 0"), 1);
+    const result = await provider.runJob(spec);
+    expect(result.executionRole?.trustPolicyVersion).toBe("v2-source-restricted");
+    expect(result.executionRole?.revocation.policyApplied).toBe(true);
+    // Quarantine lifecycle: role is retained (deny-all + revocation applied) and deleted later by the reaper.
+    expect(result.executionRole?.deletion.deleted).toBe(false);
+    expect(result.executionRole?.lifecycleState).toBe("WAITING_FOR_SESSION_EXPIRY");
+    expect(result.executionRole?.deleteNotBefore).toBeTruthy();
+    expect(result.sourceVerified).toBe(true);
+    expect(result.artifactIntegrity?.verified).toBe(true);
+    expect(result.artifactIntegrity?.sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("12. rejects the job when the uploaded source fails checksum verification", async () => {
+    const clients = fakeClients([succeeded], "");
+    clients.s3.headObject = async () => ({ metadataSha256: "0".repeat(64), checksumSha256: null, versionId: null, contentLength: 1 });
+    const provider = new CodeBuildExecutionProvider(config, clients, 1);
+    await expect(provider.runJob(spec)).rejects.toThrow(/Source integrity verification failed/);
+  });
+
+  it("13+14. rejects artifacts belonging to another run", async () => {
+    const foreign: BuildInfo = { ...succeeded, artifactsLocation: "arn:aws:s3:::bucket/runs/run_OTHER/artifacts/build.zip" };
+    const provider = new CodeBuildExecutionProvider(config, fakeClients([foreign], "DNAFIX_CHECK_END test 0"), 1);
+    const result = await provider.runJob(spec);
+    expect(result.artifactIntegrity?.verified).toBe(false);
+    expect(result.artifactIntegrity?.error).toMatch(/cross-run/);
+    expect(result.status).toBe("FAILED");
   });
 
   it("refuses to run when unconfigured (no silent local fallback)", async () => {
@@ -216,9 +259,9 @@ describe("CodeBuildExecutionProvider (mocked AWS clients)", () => {
     const provider = new CodeBuildExecutionProvider(config, fakeClients([succeeded], "DNAFIX_CHECK_END test 0", captured), 1, undefined);
     // Skip IAM propagation delay in tests by using a 0-delay manager path (provider default is 8s; override via env-free subclass not needed: poll interval small, accept delay via fake timers not available) — instead assert with delay tolerated.
     const result = await provider.runJob(spec);
-    expect(result.executionRole?.arn).toContain("dnafix-run-run_test1");
-    expect(result.executionRole?.deleted).toBe(true);
-    expect(captured.roles).toEqual(["create:dnafix-run-run_test1", "delete:dnafix-run-run_test1"]);
+    expect(result.executionRole?.roleArn).toContain("dnafix-run-run_test1");
+    expect(result.executionRole?.lifecycleState).toBe("WAITING_FOR_SESSION_EXPIRY");
+    expect(captured.roles).toEqual(["create:dnafix-run-run_test1"]); // deletion deferred to the reaper after deleteNotBefore
     expect(captured.starts[0]?.serviceRoleArn).toContain("dnafix-run-run_test1");
   }, 30_000);
 
@@ -238,7 +281,8 @@ describe("per-run role policy", () => {
     for (const resource of resources.filter((r) => r.includes("s3"))) {
       expect(resource === "arn:aws:s3:::bucket" || resource.includes("runs/run_42/"), resource).toBe(true);
     }
-    expect(runRoleName("run_42/x")).toBe("dnafix-run-run_42-x");
-    expect(runRoleName("a".repeat(100)).length).toBeLessThanOrEqual(64);
+    expect(runRoleName("run_42")).toBe("dnafix-run-run_42");
+    expect(() => runRoleName("run_42/x")).toThrow(/Invalid runId/);
+    expect(runRoleName("a".repeat(60)).length).toBeLessThanOrEqual(64);
   });
 });

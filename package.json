@@ -23,6 +23,7 @@
     "model:smoke": "tsx packages/model-provider/scripts/smoke.ts",
     "demo:offline": "tsx scripts/demo-offline.mts",
     "remote:check": "tsx scripts/run-remote-check.mts",
+    "roles:reap": "tsx scripts/reap-roles.mts",
     "fixture:seed": "tsx scripts/seed-fixture.mts"
   },
   "devDependencies": {

@@ -1,0 +1,60 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManagePerRunRoles",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:ListRolePolicies", "iam:TagRole"],
+      "Resource": "arn:aws:iam::121728644078:role/dnafix-run-*"
+    },
+    {
+      "Sid": "ManagePerRunRolePolicies",
+      "Effect": "Allow",
+      "Action": ["iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy"],
+      "Resource": "arn:aws:iam::121728644078:role/dnafix-run-*"
+    },
+    {
+      "Sid": "PassPerRunRolesToCodeBuildOnly",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::121728644078:role/dnafix-run-*",
+      "Condition": {
+        "StringEquals": { "iam:PassedToService": "codebuild.amazonaws.com" }
+      }
+    },
+    {
+      "Sid": "ReaperDiscoveryListRoles",
+      "Effect": "Allow",
+      "Action": ["iam:ListRoles"],
+      "Resource": "*",
+      "_comment": "iam:ListRoles does not support resource-level scoping in IAM; read-only discovery only. Tag/name validation happens in DNAFix code before any write."
+    },
+    {
+      "Sid": "ReaperDiscoveryRoleReads",
+      "Effect": "Allow",
+      "Action": ["iam:ListRolePolicies", "iam:ListRoleTags", "iam:GetRole"],
+      "Resource": "arn:aws:iam::121728644078:role/dnafix-run-*"
+    },
+    {
+      "Sid": "DesignatedCodeBuildProject",
+      "Effect": "Allow",
+      "Action": ["codebuild:StartBuild", "codebuild:StopBuild", "codebuild:BatchGetBuilds", "codebuild:ListBuildsForProject", "codebuild:ListBuilds"],
+      "Resource": "arn:aws:codebuild:ap-southeast-2:121728644078:project/dnafix-build"
+    },
+    {
+      "Sid": "DnafixBucketRunPrefixes",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket", "s3:GetBucketLocation"],
+      "Resource": ["arn:aws:s3:::dnafix-artifacts-121728644078", "arn:aws:s3:::dnafix-artifacts-121728644078/runs/*"]
+    },
+    {
+      "Sid": "ReadBuildLogs",
+      "Effect": "Allow",
+      "Action": ["logs:GetLogEvents", "logs:DescribeLogStreams"],
+      "Resource": [
+        "arn:aws:logs:ap-southeast-2:121728644078:log-group:/aws/codebuild/dnafix-build",
+        "arn:aws:logs:ap-southeast-2:121728644078:log-group:/aws/codebuild/dnafix-build:*"
+      ]
+    }
+  ]
+}

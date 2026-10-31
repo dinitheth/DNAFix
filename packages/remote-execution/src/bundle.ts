@@ -70,14 +70,20 @@ export async function createSourceBundle(workspacePath: string, gitRunner: (args
     .map((s) => s.trim().replaceAll("\\", "/"))
     .filter(Boolean)
     .sort();
-  const files = listed.filter((f) => !isExcludedFromBundle(f));
+  // Drop directory entries (including git submodule gitlinks): tar would
+  // otherwise recursively swallow nested repositories and their node_modules.
+  const { stat } = await import("node:fs/promises");
+  const files: string[] = [];
+  for (const f of listed.filter((entry) => !isExcludedFromBundle(entry))) {
+    const info = await stat(path.join(workspacePath, f)).catch(() => null);
+    if (info?.isFile()) files.push(f);
+  }
   if (files.length === 0) throw new Error(`Source bundle for ${workspacePath} would be empty after exclusions`);
   const staging = await mkdtemp(path.join(tmpdir(), "dnafix-bundle-"));
   const listPath = path.join(staging, "files.txt");
   const zipPath = path.join(staging, "source.zip");
   await writeFile(listPath, files.join("\n"), "utf8");
   await runTar(["-a", "-cf", zipPath, "-C", workspacePath, "-T", listPath]);
-  const { stat } = await import("node:fs/promises");
   const sha256 = await sha256File(zipPath);
   return { zipPath, files, sha256, bytes: (await stat(zipPath)).size };
 }

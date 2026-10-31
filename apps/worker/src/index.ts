@@ -7,6 +7,11 @@ import { Pipeline, createDefaultDeps } from "@dnafix/application";
  * the API re-invoke the pipeline directly, so this poller is a recovery path.
  * With WORKFLOW_ENGINE=temporal, starts a Temporal worker instead (see ./temporal.ts).
  */
+if (process.env.REAPER_ENABLED === "true") {
+  const { startRoleReaperWorker } = await import("./reaper.js");
+  startRoleReaperWorker();
+}
+
 if (process.env.WORKFLOW_ENGINE === "temporal") {
   const { startTemporalWorker } = await import("./temporal.js");
   await startTemporalWorker();
