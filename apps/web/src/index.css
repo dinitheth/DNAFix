@@ -1,1 +1,54 @@
 @import "tailwindcss";
+
+@theme {
+  --color-background: #0b0e14;
+  --color-surface: #111722;
+  --color-surface-elevated: #171f2c;
+  --color-surface-hover: #1c2635;
+  --color-border: #252c3a;
+  --color-border-strong: #323d52;
+  --color-text-primary: #e8edf5;
+  --color-text-secondary: #97a2b4;
+  --color-text-muted: #697588;
+  --color-accent: #647bfa;
+  --color-accent-hover: #7a8efb;
+  --color-success: #32b987;
+  --color-warning: #e3a64a;
+  --color-danger: #e36a75;
+  --font-sans: "Inter", ui-sans-system, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(100, 123, 250, 0.35);
+}
+
+/* Visible, consistent focus for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Subtle scrollbars for code/log panes */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: #2b3549;
+  border-radius: 8px;
+}
