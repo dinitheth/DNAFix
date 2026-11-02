@@ -1,25 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  /* DNAFix design tokens (from the maintainer's design reference):
-     Linear-style indigo primary, layered dark surfaces, JetBrains Mono for code. */
+  /* DNAFix "Obsidian Precision" tokens (maintainer design spec, docs: G:\DNAFix UI\DESIGN.md):
+     neutral charcoal-obsidian layers, hairline borders, Inter + JetBrains Mono. */
   --color-background: #141518;
-  --color-surface: #1a1b20;
-  --color-surface-elevated: #282a31;
-  --color-surface-hover: #1e2026;
-  --color-border: #26282e;
-  --color-border-strong: #2e3038;
-  --color-text-primary: #eceef0;
+  --color-surface: #18191d;
+  --color-card: #1e1f24;
+  --color-surface-elevated: #28292e;
+  --color-surface-hover: #28292e;
+  --color-popover: #222328;
+  --color-border: #2e3036;
+  --color-border-strong: #363840;
+  --color-text-primary: #eeeef0;
   --color-text-secondary: #8a8f98;
-  --color-text-muted: #5e626e;
+  --color-text-muted: #62666f;
   --color-accent: #5e6ad2;
-  --color-accent-hover: #6875e3;
+  --color-accent-hover: #6f7ce0;
   --color-accent-soft: #bdc2ff;
   --color-success: #27a567;
-  --color-success-light: #34d399;
+  --color-success-light: #45b58a;
   --color-warning: #e5a158;
   --color-danger: #e5484d;
-  --font-sans: "Geist", "Inter", ui-sans-system, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter", ui-sans-system, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 }
 

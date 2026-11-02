@@ -110,10 +110,10 @@ export function NewAnalysis() {
         <p className="mt-1 max-w-2xl text-sm text-text-secondary">Understand the repository. Investigate the issue. Prepare a verified engineering change with reproducible telemetry.</p>
       </header>
 
-      <div className="grid items-start gap-5 lg:grid-cols-12">
-        <form onSubmit={submit} noValidate className="flex min-w-0 flex-col gap-5 lg:col-span-8">
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <form onSubmit={submit} noValidate className="flex min-w-0 flex-col gap-5">
           {/* 01 / Repository source */}
-          <section className="rounded-xl border border-border bg-surface p-5 shadow-sm" aria-label="Repository source">
+          <section className="rounded-lg border border-border bg-surface p-5 shadow-sm" aria-label="Repository source">
             <div className="mb-4 flex items-center justify-between">
               <SectionLabel index="01">Repository Source</SectionLabel>
             </div>
@@ -189,7 +189,7 @@ export function NewAnalysis() {
           </section>
 
           {/* 02 / Issue specification */}
-          <section className="rounded-xl border border-border bg-surface p-5 shadow-sm" aria-label="Issue specification">
+          <section className="rounded-lg border border-border bg-surface p-5 shadow-sm" aria-label="Issue specification">
             <div className="mb-4 flex items-center justify-between">
               <SectionLabel index="02">Issue Specification</SectionLabel>
             </div>
@@ -239,7 +239,7 @@ export function NewAnalysis() {
           </section>
 
           {/* 03 / Execution action bar */}
-          <section className="flex flex-col items-stretch justify-between gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm sm:flex-row sm:items-center" aria-label="Start analysis">
+          <section className="flex flex-col items-stretch justify-between gap-4 rounded-lg border border-border bg-surface p-5 shadow-sm sm:flex-row sm:items-center" aria-label="Start analysis">
             <p className="flex items-center gap-2 text-xs leading-relaxed text-text-secondary">
               <Play size={14} className="shrink-0 text-accent" aria-hidden />
               <span>
@@ -260,7 +260,7 @@ export function NewAnalysis() {
           </section>
 
           {blockers.length > 0 && (
-            <div className="rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3" role="alert">
+            <div className="rounded-lg border border-red-500/25 bg-red-500/5 px-4 py-3" role="alert">
               <p className="text-[13px] font-medium text-danger">Analysis cannot start yet</p>
               <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs leading-relaxed text-text-secondary">
                 {blockers.map((b) => (
@@ -270,13 +270,13 @@ export function NewAnalysis() {
             </div>
           )}
           {serverError && (
-            <p className="rounded-xl border border-red-500/25 bg-red-500/5 px-4 py-3 text-[13px] text-danger" role="alert">
+            <p className="rounded-lg border border-red-500/25 bg-red-500/5 px-4 py-3 text-[13px] text-danger" role="alert">
               The API rejected this submission: {serverError}. Your input has been preserved — fix the problem and try again.
             </p>
           )}
         </form>
 
-        <aside className="min-w-0 lg:col-span-4">
+        <aside className="min-w-0">
           <ReadinessPanel config={config.data} />
         </aside>
       </div>

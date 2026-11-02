@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTML
 
 export function Panel({ title, actions, children, className = "" }: { title?: string; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`rounded-xl border border-border bg-surface shadow-sm ${className}`} aria-label={title}>
+    <section className={`rounded-lg border border-border bg-surface ${className}`} aria-label={title}>
       {title && (
         <header className="flex items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-[13px] font-semibold text-text-primary">{title}</h3>
@@ -26,7 +26,7 @@ export function SectionLabel({ index, children }: { index: string; children: Rea
 type Tone = "success" | "danger" | "warning" | "accent" | "neutral";
 
 const TONE_STYLES: Record<Tone, string> = {
-  success: "bg-emerald-500/10 text-success ring-emerald-500/25",
+  success: "bg-emerald-500/10 text-success-light ring-emerald-500/25",
   danger: "bg-red-500/10 text-danger ring-red-500/25",
   warning: "bg-amber-500/10 text-warning ring-amber-500/25",
   accent: "bg-indigo-500/10 text-accent ring-indigo-500/30",
@@ -60,7 +60,7 @@ export function Button({
   const styles = {
     primary:
       "bg-accent text-white shadow-sm shadow-accent/25 hover:bg-accent-hover active:translate-y-px disabled:bg-surface-elevated disabled:text-text-muted disabled:shadow-none disabled:ring-1 disabled:ring-border",
-    secondary: "bg-[#222329] text-text-secondary ring-1 ring-border hover:bg-surface-elevated hover:text-text-primary disabled:text-text-muted",
+    secondary: "bg-card text-text-primary ring-1 ring-border hover:bg-surface-elevated hover:ring-border-strong disabled:text-text-muted",
     "danger-ghost": "text-danger ring-1 ring-red-500/30 hover:bg-red-500/10 disabled:text-text-muted",
   }[variant];
   return (
@@ -96,7 +96,7 @@ export function Field({ label, hint, error, children }: { label: ReactNode; hint
 }
 
 const INPUT_CLASS =
-  "w-full rounded-md border border-border-strong bg-background px-3 text-sm text-text-primary placeholder:text-text-muted transition-colors hover:border-[#424652] focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:cursor-not-allowed disabled:opacity-50";
+  "w-full rounded-md border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-muted transition-colors hover:border-border-strong focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${INPUT_CLASS} h-8 ${className}`} />;

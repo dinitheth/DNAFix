@@ -60,7 +60,7 @@ export function ReadinessPanel({ config }: { config?: ConfigStatus }) {
   return (
     <div className="flex flex-col gap-2">
       {/* Header card */}
-      <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+      <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-1.5 text-[13px] font-medium text-text-primary">
             <ClipboardCheck size={15} className="text-accent" aria-hidden /> System Readiness
@@ -84,7 +84,7 @@ export function ReadinessPanel({ config }: { config?: ConfigStatus }) {
       {items.map((item) => {
         const meta = moduleMeta(item.id, config);
         return (
-          <article key={item.id} className="flex flex-col gap-1.5 rounded-lg border border-border bg-surface p-4 transition-colors hover:border-[#424652]">
+          <article key={item.id} className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-4 transition-colors hover:border-border-strong">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <span className={`h-2 w-2 rounded-full ${DOT[item.tone]}`} aria-hidden />
@@ -105,7 +105,7 @@ export function ReadinessPanel({ config }: { config?: ConfigStatus }) {
       })}
 
       {/* Diagnostics accordion */}
-      <div className="overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <button
           type="button"
           onClick={() => setShowDiagnostics((v) => !v)}

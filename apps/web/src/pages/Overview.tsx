@@ -55,7 +55,7 @@ export function Overview() {
   );
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0">
         <div id="runs" className="mb-4 flex scroll-mt-16 flex-wrap items-center gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Runs</h1>
