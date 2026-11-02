@@ -28,7 +28,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           tone: "blocked",
           state: "Not configured",
           explanation: "No model API key is available to the API process. Planning cannot start.",
-          recovery: "Set MODEL_API_KEY in the API environment and restart the API.",
+          recovery: "Configure MODEL_API_KEY →",
         },
     config.projectDna.configured
       ? {
@@ -44,7 +44,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           tone: "blocked",
           state: "Not configured",
           explanation: "Repository intelligence is unavailable. Runs stop before planning.",
-          recovery: "Initialize the vendor/Project-DNA submodule and install its dependencies, or set PROJECT_DNA_PATH.",
+          recovery: "Install submodule deps or set PROJECT_DNA_PATH →",
         },
     config.github.configured
       ? {
@@ -60,7 +60,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           tone: "optional",
           state: "Not configured",
           explanation: "Optional. Without it, verified runs complete as local patches instead of draft pull requests.",
-          recovery: "Configure the GitHub App (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_INSTALLATION_ID) to enable draft PRs.",
+          recovery: "Link GitHub App token →",
         },
   ];
 
@@ -98,7 +98,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
       tone: "attention",
       state: "Local host execution",
       explanation: "Builds and tests run directly on this machine. Suitable for trusted code only.",
-      recovery: "For untrusted repositories, use SANDBOX_MODE=docker or DNAFIX_EXECUTION_PROVIDER=codebuild.",
+      recovery: "Use Docker or CodeBuild for untrusted code →",
     });
   }
 

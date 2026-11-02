@@ -1,21 +1,25 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0b0e14;
-  --color-surface: #111722;
-  --color-surface-elevated: #171f2c;
-  --color-surface-hover: #1c2635;
-  --color-border: #252c3a;
-  --color-border-strong: #323d52;
-  --color-text-primary: #e8edf5;
-  --color-text-secondary: #97a2b4;
-  --color-text-muted: #697588;
-  --color-accent: #647bfa;
-  --color-accent-hover: #7a8efb;
-  --color-success: #32b987;
-  --color-warning: #e3a64a;
-  --color-danger: #e36a75;
-  --font-sans: "Inter", ui-sans-system, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* DNAFix design tokens (from the maintainer's design reference):
+     Linear-style indigo primary, layered dark surfaces, JetBrains Mono for code. */
+  --color-background: #141518;
+  --color-surface: #1a1b20;
+  --color-surface-elevated: #282a31;
+  --color-surface-hover: #1e2026;
+  --color-border: #26282e;
+  --color-border-strong: #2e3038;
+  --color-text-primary: #eceef0;
+  --color-text-secondary: #8a8f98;
+  --color-text-muted: #5e626e;
+  --color-accent: #5e6ad2;
+  --color-accent-hover: #6875e3;
+  --color-accent-soft: #bdc2ff;
+  --color-success: #27a567;
+  --color-success-light: #34d399;
+  --color-warning: #e5a158;
+  --color-danger: #e5484d;
+  --font-sans: "Geist", "Inter", ui-sans-system, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
 }
 

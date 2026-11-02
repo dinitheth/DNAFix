@@ -49,7 +49,7 @@ export function Overview() {
   );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Runs</h1>
@@ -117,7 +117,7 @@ export function Overview() {
         )}
         {visible.length > 0 && (
           <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-            <table className="w-full min-w-[760px] text-left text-[13px]">
+            <table className="w-full min-w-[680px] text-left text-[13px]">
               <thead>
                 <tr className="border-b border-border text-xs text-text-muted">
                   <th scope="col" className="px-4 py-2.5 font-medium">Issue</th>
@@ -132,11 +132,11 @@ export function Overview() {
               <tbody className="divide-y divide-border">
                 {visible.map((run) => (
                   <tr key={run.id} className="transition-colors hover:bg-surface-hover">
-                    <td className="max-w-[300px] px-4 py-3">
-                      <Link to={`/runs/${run.id}`} className="font-medium text-text-primary hover:text-accent">
+                    <td className="max-w-[260px] px-4 py-2.5">
+                      <Link to={`/runs/${run.id}`} className="block truncate font-medium text-text-primary hover:text-accent" title={run.issueTitle}>
                         {run.issueTitle}
                       </Link>
-                      <div className="mt-0.5 font-mono text-[11px] text-text-muted">{run.id}</div>
+                      <div className="mt-0.5 font-mono text-[10px] text-text-muted">{run.id}</div>
                     </td>
                     <td className="max-w-[180px] truncate px-4 py-3 text-text-secondary">{repositoryLabel(run, repos.data ?? [], run.repositoryId)}</td>
                     <td className="px-4 py-3">
@@ -144,7 +144,7 @@ export function Overview() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-text-secondary">{new Date(run.createdAt).toLocaleString()}</td>
                     <td className="px-4 py-3 text-text-secondary">{formatDuration(run.createdAt, run.updatedAt)}</td>
-                    <td className="max-w-[220px] truncate px-4 py-3 text-text-secondary" title={resultSummary(run)}>
+                    <td className="max-w-[190px] truncate px-4 py-2.5 text-text-secondary" title={resultSummary(run)}>
                       {resultSummary(run)}
                     </td>
                     <td className="px-4 py-3 text-right">
