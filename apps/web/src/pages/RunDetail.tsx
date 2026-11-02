@@ -436,7 +436,7 @@ export function RunDetail() {
               )}
               {r.diff && (
                 <pre
-                  className="scroll-thin mt-2 max-h-[420px] overflow-auto rounded-lg border border-[#26282E] bg-[#141518] p-2 font-mono text-[11px] leading-relaxed text-[#8A8F98]"
+                  className="mt-2 max-h-[420px] overflow-auto rounded-lg border border-[#26282E] bg-[#141518] p-2 font-mono text-[11px] leading-relaxed text-[#8A8F98]"
                   aria-label="Diff"
                 >
                   {r.diff}
@@ -467,7 +467,7 @@ export function RunDetail() {
 
           <RailCard icon="history" title="Audit History">
             {audit.isLoading && <Skeleton className="h-20 w-full" />}
-            <ul className="scroll-thin max-h-[420px] overflow-auto">
+            <ul className="max-h-[420px] overflow-auto">
               {(audit.data ?? []).map((e) => (
                 <li key={e.id} className="flex gap-2 border-b border-[#26282E]/60 py-1.5 last:border-0 first:pt-0">
                   <span className="shrink-0 font-mono text-[10px] leading-[18px] text-[#5E626E]">{new Date(e.createdAt).toLocaleTimeString()}</span>
