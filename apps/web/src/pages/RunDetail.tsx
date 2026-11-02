@@ -1,44 +1,130 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, CircleAlert, CircleDashed, Hand, Loader2, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { Button, KeyValue, Panel, Skeleton, StatusPill } from "../components/ui";
+import { Icon } from "../components/Icon";
+import { Button, SectionLabel, Skeleton, StatusPill } from "../components/ui";
 import { api, type AuditEvent, type Run } from "../lib/api";
 import { runStages, stateLabel, stateTone, type StageStatus } from "../lib/status";
 
 const API = "/api/v1";
 
-const STAGE_ICON: Record<StageStatus, { icon: typeof Circle; className: string }> = {
-  completed: { icon: CheckCircle2, className: "text-success" },
-  running: { icon: Loader2, className: "animate-spin text-accent" },
-  pending: { icon: Circle, className: "text-text-muted" },
-  failed: { icon: XCircle, className: "text-danger" },
-  blocked: { icon: CircleAlert, className: "text-danger" },
-  "requires-approval": { icon: Hand, className: "text-warning" },
+const STAGE: Record<StageStatus, { icon: string; className: string; label: string }> = {
+  completed: { icon: "check_circle", className: "text-[#34D399]", label: "Complete" },
+  running: { icon: "progress_activity", className: "animate-spin text-[#BDC2FF]", label: "Running" },
+  pending: { icon: "radio_button_unchecked", className: "text-[#5E626E]", label: "Pending" },
+  failed: { icon: "cancel", className: "text-[#E5484D]", label: "Failed" },
+  blocked: { icon: "error", className: "text-[#E5484D]", label: "Blocked" },
+  "requires-approval": { icon: "pan_tool", className: "text-[#E5A158]", label: "Approval" },
 };
 
-function Timeline({ run }: { run: Run }) {
-  const stages = runStages(run);
+function Card({
+  index,
+  title,
+  actions,
+  tone = "default",
+  children,
+}: {
+  index: string;
+  title: string;
+  actions?: ReactNode;
+  tone?: "default" | "warning";
+  children: ReactNode;
+}) {
   return (
-    <ol className="flex flex-wrap items-center gap-x-1 gap-y-2" aria-label="Run stages">
-      {stages.map((stage, i) => {
-        const { icon: Icon, className } = STAGE_ICON[stage.status];
-        return (
-          <li key={stage.id} className="flex items-center gap-1">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-                stage.status === "running" || stage.status === "requires-approval" ? "bg-surface-elevated ring-border-strong text-text-primary" : "ring-border text-text-secondary"
-              }`}
-              title={`${stage.label}: ${stage.status}`}
-            >
-              <Icon size={13} className={className} aria-hidden />
-              {stage.label}
-            </span>
-            {i < stages.length - 1 && <span className="mx-0.5 h-px w-3 bg-border-strong" aria-hidden />}
-          </li>
-        );
-      })}
-    </ol>
+    <section
+      className={`rounded-xl border bg-[#1A1B20] p-3 shadow-sm ${
+        tone === "warning" ? "border-[#E5A158]/30" : "border-[#26282E]"
+      }`}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <SectionLabel index={index}>{title}</SectionLabel>
+        {actions}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function RailCard({
+  icon,
+  title,
+  actions,
+  children,
+}: {
+  icon: string;
+  title: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Icon name={icon} size={15} className="text-[#5E626E]" />
+          <h2 className="text-[13px] font-medium leading-[18px] tracking-[-0.01em] text-[#ECEEF0]">{title}</h2>
+        </div>
+        {actions}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Row({ label, mono = false, children }: { label: string; mono?: boolean; children: ReactNode }) {
+  return (
+    <div className="flex gap-3 border-b border-[#26282E]/60 py-1.5 last:border-0">
+      <dt className="w-[124px] shrink-0 text-[12px] leading-4 text-[#8A8F98]">{label}</dt>
+      <dd className={`min-w-0 flex-1 text-[12px] leading-[18px] text-[#ECEEF0] ${mono ? "break-all font-mono text-[11px]" : ""}`}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function ProposalList({ items }: { items: string[] }) {
+  return (
+    <ul className="flex flex-col gap-1 pl-4 text-[12px] leading-4 text-[#8A8F98]">
+      {items.map((item) => (
+        <li key={item} className="list-disc marker:text-[#5E626E]">
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Pipeline({ run }: { run: Run }) {
+  const stages = runStages(run);
+  const done = stages.filter((s) => s.status === "completed").length;
+
+  return (
+    <section className="mb-3 rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm" aria-label="Run pipeline">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <SectionLabel index="01">Pipeline</SectionLabel>
+        <span className="font-mono text-[10px] uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">
+          {done}/{stages.length} stages complete
+        </span>
+      </div>
+      <ol className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#26282E] bg-[#26282E] md:grid-cols-3 xl:grid-cols-6">
+        {stages.map((stage) => {
+          const meta = STAGE[stage.status];
+          const active = stage.status === "running" || stage.status === "requires-approval";
+          return (
+            <li key={stage.id} className={`px-2 py-2 ${active ? "bg-[#1E2026]" : "bg-[#141518]"}`}>
+              <div className="flex items-center gap-1.5">
+                <Icon name={meta.icon} size={14} className={meta.className} />
+                <span className="truncate font-mono text-[10px] uppercase leading-[14px] tracking-[0.03em] text-[#8A8F98]" title={stage.label}>
+                  {stage.label}
+                </span>
+              </div>
+              <p className={`mt-1 font-mono text-[11px] leading-[14px] ${active ? "text-[#ECEEF0]" : "text-[#5E626E]"}`}>
+                {meta.label}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 
@@ -75,16 +161,16 @@ export function RunDetail() {
 
   if (run.isLoading) {
     return (
-      <div className="space-y-3" aria-label="Loading run">
-        <Skeleton className="h-8 w-96" />
-        <Skeleton className="h-10 w-full" />
-        <Skeleton className="h-48 w-full" />
+      <div className="flex flex-col gap-3" aria-label="Loading run">
+        <Skeleton className="h-[64px] w-full" />
+        <Skeleton className="h-[96px] w-full" />
+        <Skeleton className="h-[280px] w-full" />
       </div>
     );
   }
   if (run.isError) {
     return (
-      <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-danger" role="alert">
+      <div className="rounded-xl border border-[#E5484D]/25 bg-[#E5484D]/5 px-3 py-2 text-[12px] leading-4 text-[#E5484D]" role="alert">
         Could not load this run: {(run.error as Error).message}
         <button className="ml-3 underline" onClick={() => void run.refetch()}>
           Retry
@@ -94,120 +180,130 @@ export function RunDetail() {
   }
   const r = run.data!;
   const terminal = ["COMPLETED", "FAILED", "CANCELLED"].includes(r.state);
+  const verificationReady = r.verificationChecks || r.diff;
 
   return (
-    <div className="space-y-5">
-      <header>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="min-w-0 text-lg font-semibold tracking-tight">{r.issueTitle}</h1>
-          <StatusPill tone={stateTone(r.state)}>{stateLabel(r.state)}</StatusPill>
+    <div>
+      <header className="mb-3 flex flex-col gap-1 border-b border-[#26282E] pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-[20px] font-semibold leading-[26px] tracking-[-0.02em] text-[#ECEEF0]">{r.issueTitle}</h1>
+            <StatusPill tone={stateTone(r.state)}>{stateLabel(r.state)}</StatusPill>
+          </div>
           {!terminal && (
-            <Button variant="danger-ghost" className="ml-auto" loading={acting === "cancel"} onClick={() => act("cancel", "/cancel")}>
+            <Button variant="danger-ghost" loading={acting === "cancel"} onClick={() => act("cancel", "/cancel")}>
               Cancel run
             </Button>
           )}
         </div>
-        <p className="mt-1 font-mono text-[11px] text-text-muted">
-          {r.id} · model {r.modelProvider} · base {r.baseCommitSha ? r.baseCommitSha.slice(0, 12) : "pending"} · snapshot {r.repositorySnapshotId ?? "pending"} · started{" "}
-          {new Date(r.createdAt).toLocaleString()}
+        <p className="mt-0.5 truncate font-mono text-[11px] leading-[18px] text-[#5E626E]">
+          {r.id} · model {r.modelProvider} · base {r.baseCommitSha ? r.baseCommitSha.slice(0, 12) : "pending"} · snapshot{" "}
+          {r.repositorySnapshotId ?? "pending"} · started {new Date(r.createdAt).toLocaleString()}
         </p>
-        <div className="mt-3">
-          <Timeline run={r} />
-        </div>
-        {r.error && (
-          <p className="mt-3 rounded-md border border-red-500/25 bg-red-500/5 px-3.5 py-2.5 text-[13px] text-danger" role="alert">
-            {r.error}
-          </p>
-        )}
-        {actionError && (
-          <p className="mt-3 rounded-md border border-red-500/25 bg-red-500/5 px-3.5 py-2.5 text-[13px] text-danger" role="alert">
-            Action failed: {actionError}
-          </p>
-        )}
       </header>
 
-      {r.state === "NEEDS_CLARIFICATION" && (
-        <Panel title="Clarification needed" className="border-amber-500/30">
-          <ul className="list-disc space-y-1 pl-5 text-sm text-text-secondary">
-            {r.plan?.unresolvedQuestions.map((q) => <li key={q}>{q}</li>)}
-          </ul>
-          <label className="mt-3 block text-[13px] font-medium">
-            Your answer
-            <textarea
-              value={clarification}
-              onChange={(e) => setClarification(e.target.value)}
-              rows={3}
-              className="mt-1.5 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-accent focus:outline-none"
-            />
-          </label>
-          <Button variant="primary" className="mt-3" loading={acting === "clarify"} disabled={!clarification.trim()} onClick={() => act("clarify", "/clarification", { answer: clarification })}>
-            Submit clarification
-          </Button>
-        </Panel>
+      <Pipeline run={r} />
+
+      {r.error && (
+        <p className="mb-3 rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
+          {r.error}
+        </p>
+      )}
+      {actionError && (
+        <p className="mb-3 rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
+          Action failed: {actionError}
+        </p>
       )}
 
-      <div className="grid items-start gap-5 xl:grid-cols-2">
-        <div className="space-y-5">
-          {r.intelligence && (
-            <Panel title="Project DNA evidence">
-              <KeyValue
-                rows={[
-                  ["Architecture", r.intelligence.architecture.summary],
-                  ["Layers", r.intelligence.architecture.layers.join(", ") || "—"],
-                  ["Analysis", r.intelligence.complete ? "Complete" : "Incomplete — see warnings"],
-                  ...(r.intelligence.warnings.length ? [["Warnings", r.intelligence.warnings.join("; ")] as [string, string]] : []),
-                  ...(r.intelligence.criticalComponents.length
-                    ? [["Critical components", r.intelligence.criticalComponents.map((c) => c.name).join(", ")] as [string, string]]
-                    : []),
-                ]}
+      {r.state === "NEEDS_CLARIFICATION" && (
+        <section className="mb-3 rounded-xl border border-[#E5A158]/30 bg-[#1A1B20] p-3 shadow-sm">
+          <div className="mb-2 flex items-center gap-1.5">
+            <Icon name="help" size={15} className="text-[#E5A158]" />
+            <h2 className="text-[13px] font-medium leading-[18px] text-[#ECEEF0]">Clarification needed</h2>
+          </div>
+          <div className="rounded-lg border border-[#26282E] bg-[#141518] p-2">
+            <ProposalList items={r.plan?.unresolvedQuestions ?? []} />
+            <label htmlFor="clarification" className="mt-3 block text-[12px] leading-4 text-[#8A8F98]">
+              Your answer
+              <textarea
+                id="clarification"
+                value={clarification}
+                onChange={(e) => setClarification(e.target.value)}
+                rows={3}
+                className="mt-1 w-full resize-y rounded-md border border-[#2E3038] bg-[#1A1B20] p-2 font-mono text-[12px] leading-[18px] text-[#ECEEF0] placeholder:text-[#5E626E] focus:border-[#5E6AD2] focus:outline-none focus:ring-1 focus:ring-[#5E6AD2]"
               />
+            </label>
+          </div>
+          <div className="mt-2 flex justify-end">
+            <Button
+              variant="primary"
+              loading={acting === "clarify"}
+              disabled={!clarification.trim()}
+              onClick={() => act("clarify", "/clarification", { answer: clarification })}
+            >
+              Submit clarification
+            </Button>
+          </div>
+        </section>
+      )}
+
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
+        <div className="flex min-w-0 flex-col gap-3 lg:col-span-8">
+          {r.intelligence && (
+            <Card index="02" title="Project DNA Evidence">
+              <dl>
+                <Row label="Architecture">{r.intelligence.architecture.summary}</Row>
+                <Row label="Layers">{r.intelligence.architecture.layers.join(", ") || "—"}</Row>
+                <Row label="Analysis" mono>
+                  {r.intelligence.complete ? "Complete" : "Incomplete — see warnings"}
+                </Row>
+                {r.intelligence.warnings.length > 0 && <Row label="Warnings">{r.intelligence.warnings.join("; ")}</Row>}
+                {r.intelligence.criticalComponents.length > 0 && (
+                  <Row label="Critical components">{r.intelligence.criticalComponents.map((c) => c.name).join(", ")}</Row>
+                )}
+              </dl>
               {r.intelligence.targets.length > 0 && (
-                <div className="mt-3 space-y-2">
+                <div className="mt-2 flex flex-col gap-1">
                   {r.intelligence.targets.map((t) => (
-                    <div key={t.targetPath} className="rounded-md bg-background px-3 py-2 text-[13px]">
-                      <code className="font-mono text-xs text-accent">{t.targetPath}</code>
-                      <p className="mt-0.5 text-text-secondary">
+                    <div key={t.targetPath} className="rounded-lg border border-[#26282E] bg-[#141518] p-2">
+                      <code className="block truncate font-mono text-[11px] leading-[18px] text-[#BDC2FF]" title={t.targetPath}>
+                        {t.targetPath}
+                      </code>
+                      <p className="mt-0.5 text-[12px] leading-4 text-[#8A8F98]">
                         Direct impact: {t.directImpacted.join(", ") || "none"} · Transitive: {t.transitiveImpacted.join(", ") || "none"}
-                        {t.truncations.length > 0 && <span className="text-warning"> · truncated ({t.truncations.join(", ")})</span>}
+                        {t.truncations.length > 0 && <span className="text-[#E5A158]"> · truncated ({t.truncations.join(", ")})</span>}
                       </p>
                     </div>
                   ))}
                 </div>
               )}
-            </Panel>
+            </Card>
           )}
 
           {r.analysis && (
-            <Panel title="Issue analysis">
-              <p className="text-sm text-text-secondary">{r.analysis.summary}</p>
-              <KeyValue
-                rows={[
-                  ["Risk level", r.analysis.riskLevel],
-                  ["Requirements", r.analysis.requirements.join("; ")],
-                ]}
-              />
-              <h4 className="mb-1 mt-3 text-[13px] font-medium">Acceptance criteria</h4>
-              <ul className="list-disc space-y-0.5 pl-5 text-[13px] text-text-secondary">
-                {r.analysis.acceptanceCriteria.map((c) => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
+            <Card index="03" title="Issue Analysis">
+              <p className="mb-2 text-[12px] leading-4 text-[#8A8F98]">{r.analysis.summary}</p>
+              <dl>
+                <Row label="Risk level" mono>
+                  {r.analysis.riskLevel}
+                </Row>
+                <Row label="Requirements">{r.analysis.requirements.join("; ")}</Row>
+              </dl>
+              <h3 className="mb-1 mt-2 font-mono text-[10px] uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">Acceptance criteria</h3>
+              <ProposalList items={r.analysis.acceptanceCriteria} />
               {r.analysis.ambiguities.length > 0 && (
                 <>
-                  <h4 className="mb-1 mt-3 text-[13px] font-medium">Ambiguities</h4>
-                  <ul className="list-disc space-y-0.5 pl-5 text-[13px] text-text-secondary">
-                    {r.analysis.ambiguities.map((a) => (
-                      <li key={a}>{a}</li>
-                    ))}
-                  </ul>
+                  <h3 className="mb-1 mt-2 font-mono text-[10px] uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">Ambiguities</h3>
+                  <ProposalList items={r.analysis.ambiguities} />
                 </>
               )}
-            </Panel>
+            </Card>
           )}
 
           {r.plan && (
-            <Panel
-              title="Implementation plan"
+            <Card
+              index="04"
+              title="Implementation Plan"
               actions={
                 r.state === "AWAITING_PLAN_APPROVAL" ? (
                   <Button variant="primary" loading={acting === "plan"} onClick={() => act("plan", "/approve-plan")}>
@@ -216,140 +312,185 @@ export function RunDetail() {
                 ) : undefined
               }
             >
-              <div className="space-y-2">
+              <div className="flex flex-col gap-1">
                 {r.plan.tasks.map((t) => (
-                  <div key={t.id} className="rounded-md bg-background px-3 py-2.5">
-                    <p className="text-[13px] font-medium">
-                      {t.title} <span className="ml-1 font-mono text-[11px] text-text-muted">{t.id}</span>
+                  <div key={t.id} className="rounded-lg border border-[#26282E] bg-[#141518] p-2">
+                    <p className="flex items-baseline gap-1.5 text-[12px] font-medium leading-[18px] text-[#ECEEF0]">
+                      <span className="min-w-0">{t.title}</span>
+                      <span className="shrink-0 font-mono text-[10px] font-normal text-[#5E626E]">{t.id}</span>
                     </p>
-                    <p className="mt-0.5 text-xs leading-relaxed text-text-secondary">{t.description}</p>
-                    <p className="mt-1.5 font-mono text-[11px] text-text-muted">
+                    <p className="mt-0.5 text-[12px] leading-4 text-[#8A8F98]">{t.description}</p>
+                    <p className="mt-1 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]">
                       scope: {t.fileScope.join(", ")}
                       {t.dependsOn.length > 0 && <> · after: {t.dependsOn.join(", ")}</>}
                     </p>
                   </div>
                 ))}
               </div>
-              <p className="mt-3 text-xs text-text-muted">
-                Predicted impact: {r.plan.predictedAffectedPaths.map((p) => `${p.path} (${p.source})`).join(", ") || "—"}
+              <p className="mt-2 truncate font-mono text-[11px] leading-[18px] text-[#5E626E]" title={r.plan.predictedAffectedPaths.map((p) => `${p.path} (${p.source})`).join(", ")}>
+                predicted impact: {r.plan.predictedAffectedPaths.map((p) => `${p.path} (${p.source})`).join(", ") || "—"}
               </p>
-            </Panel>
+            </Card>
           )}
 
           {r.tasks.length > 0 && (
-            <Panel title="Coding tasks">
-              <ul className="divide-y divide-border">
+            <Card index="05" title="Coding Tasks">
+              <ul className="flex flex-col">
                 {r.tasks.map((t) => (
-                  <li key={t.taskId} className="py-2.5 text-[13px]">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{t.taskId}</span>
-                      <StatusPill tone={t.status === "completed" ? "success" : t.status === "failed" ? "danger" : t.status === "running" ? "accent" : "neutral"}>{t.status}</StatusPill>
-                      {t.commitSha && <span className="ml-auto font-mono text-[11px] text-text-muted">commit {t.commitSha.slice(0, 10)}</span>}
+                  <li key={t.taskId} className="border-b border-[#26282E]/60 py-2 last:border-0 first:pt-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-[11px] font-medium leading-[18px] text-[#ECEEF0]">{t.taskId}</span>
+                      <StatusPill
+                        tone={t.status === "completed" ? "success" : t.status === "failed" ? "danger" : t.status === "running" ? "accent" : "neutral"}
+                      >
+                        {t.status}
+                      </StatusPill>
+                      {t.commitSha && (
+                        <span className="ml-auto font-mono text-[10px] leading-[14px] text-[#5E626E]">commit {t.commitSha.slice(0, 10)}</span>
+                      )}
                     </div>
-                    {(t.patchSummary || t.error) && <p className={`mt-1 ${t.error ? "text-danger" : "text-text-secondary"}`}>{t.error ?? t.patchSummary}</p>}
-                    {t.changedPaths.length > 0 && <p className="mt-0.5 font-mono text-[11px] text-text-muted">changed: {t.changedPaths.join(", ")}</p>}
-                  </li>
-                ))}
-              </ul>
-            </Panel>
-          )}
-        </div>
-
-        <div className="space-y-5">
-          {(r.verificationChecks || r.diff) && (
-            <Panel
-              title="Verification"
-              actions={
-                r.state === "AWAITING_PR_APPROVAL" ? (
-                  <Button variant="primary" loading={acting === "pr"} onClick={() => act("pr", "/approve-pr")}>
-                    Approve and create draft PR
-                  </Button>
-                ) : undefined
-              }
-            >
-              <p className="text-xs text-text-muted">Baseline: {r.baselineChecks.map((c) => `${c.kind} ${c.status}`).join(" · ") || "—"}</p>
-              <ul className="mt-2 divide-y divide-border">
-                {(r.verificationChecks ?? []).map((c) => (
-                  <li key={c.kind} className="flex items-center gap-2 py-2 text-[13px]">
-                    <span className="capitalize">{c.kind}</span>
-                    <StatusPill tone={c.status === "passed" ? "success" : c.status === "failed" ? "danger" : "neutral"}>{c.status}</StatusPill>
-                    {c.result && (
-                      <span className="ml-auto font-mono text-[11px] text-text-muted">
-                        {c.result.argv.join(" ")} · exit {c.result.exitCode ?? "—"}
-                      </span>
+                    {(t.patchSummary || t.error) && (
+                      <p className={`mt-1 text-[12px] leading-4 ${t.error ? "text-[#E5484D]" : "text-[#8A8F98]"}`}>{t.error ?? t.patchSummary}</p>
+                    )}
+                    {t.changedPaths.length > 0 && (
+                      <p className="mt-0.5 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]" title={t.changedPaths.join(", ")}>
+                        changed: {t.changedPaths.join(", ")}
+                      </p>
                     )}
                   </li>
                 ))}
               </ul>
+            </Card>
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-2 lg:col-span-4">
+          {verificationReady && (
+            <RailCard
+              icon="verified"
+              title="Verification"
+              actions={
+                r.state === "AWAITING_PR_APPROVAL" ? (
+                  <Button variant="primary" loading={acting === "pr"} onClick={() => act("pr", "/approve-pr")}>
+                    Create draft PR
+                  </Button>
+                ) : undefined
+              }
+            >
+              <p className="truncate font-mono text-[11px] leading-[14px] text-[#5E626E]" title={r.baselineChecks.map((c) => `${c.kind} ${c.status}`).join(" · ")}>
+                baseline: {r.baselineChecks.map((c) => `${c.kind} ${c.status}`).join(" · ") || "—"}
+              </p>
+              <ul className="mt-1 flex flex-col">
+                {(r.verificationChecks ?? []).map((c) => (
+                  <li key={c.kind} className="border-b border-[#26282E]/60 py-1.5 text-[12px] last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="capitalize leading-[18px] text-[#ECEEF0]">{c.kind}</span>
+                      <StatusPill tone={c.status === "passed" ? "success" : c.status === "failed" ? "danger" : "neutral"}>{c.status}</StatusPill>
+                    </div>
+                    {c.result && (
+                      <p className="mt-0.5 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]" title={`${c.result.argv.join(" ")} · exit ${c.result.exitCode ?? "—"}`}>
+                        {c.result.argv.join(" ")} · exit {c.result.exitCode ?? "—"}
+                      </p>
+                    )}
+                  </li>
+                ))}
+                {!r.verificationChecks?.length && (
+                  <li className="py-1.5 text-[12px] leading-4 text-[#5E626E]">No verification checks have run yet.</li>
+                )}
+              </ul>
+
               {r.verifierReview && (
-                <div className="mt-3 rounded-md bg-background px-3 py-2.5 text-[13px]">
-                  <p>
+                <div className="mt-2 rounded-lg border border-[#26282E] bg-[#141518] p-2">
+                  <p className="text-[12px] leading-[18px] text-[#8A8F98]">
                     Independent verifier:{" "}
-                    <strong className={r.verifierReview.verdict === "approve" ? "text-success" : "text-warning"}>{r.verifierReview.verdict}</strong>
+                    <strong className={r.verifierReview.verdict === "approve" ? "font-medium text-[#34D399]" : "font-medium text-[#E5A158]"}>
+                      {r.verifierReview.verdict}
+                    </strong>
                   </p>
-                  <p className="mt-0.5 text-text-secondary">{r.verifierReview.summary}</p>
-                  {r.verifierReview.unintendedChanges.length > 0 && <p className="mt-1 text-warning">Unintended changes: {r.verifierReview.unintendedChanges.join("; ")}</p>}
-                  {r.verifierReview.missingTests.length > 0 && <p className="mt-1 text-warning">Missing tests: {r.verifierReview.missingTests.join("; ")}</p>}
+                  <p className="mt-0.5 text-[12px] leading-4 text-[#8A8F98]">{r.verifierReview.summary}</p>
+                  {r.verifierReview.unintendedChanges.length > 0 && (
+                    <p className="mt-1 text-[12px] leading-4 text-[#E5A158]">Unintended changes: {r.verifierReview.unintendedChanges.join("; ")}</p>
+                  )}
+                  {r.verifierReview.missingTests.length > 0 && (
+                    <p className="mt-1 text-[12px] leading-4 text-[#E5A158]">Missing tests: {r.verifierReview.missingTests.join("; ")}</p>
+                  )}
                 </div>
               )}
-              <h4 className="mb-1 mt-3 text-[13px] font-medium">Changed files</h4>
-              <p className="font-mono text-xs text-text-secondary">{r.changedPaths.join(", ") || "none"}</p>
+
+              <h3 className="mb-1 mt-2 font-mono text-[10px] uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">Changed files</h3>
+              <p className="break-all font-mono text-[11px] leading-[18px] text-[#8A8F98]">{r.changedPaths.join(", ") || "none"}</p>
+
               {r.pullRequestUrl && (
-                <p className="mt-2 text-sm">
-                  Draft PR:{" "}
-                  <a className="text-accent hover:underline" href={r.pullRequestUrl} target="_blank" rel="noreferrer">
-                    {r.pullRequestUrl}
-                  </a>
-                </p>
+                <a
+                  className="mt-2 flex items-center gap-1 text-[12px] leading-4 text-[#BDC2FF] hover:text-white hover:underline"
+                  href={r.pullRequestUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open draft pull request
+                  <Icon name="arrow_forward" size={13} />
+                </a>
               )}
-              {r.state === "COMPLETED" && !r.pullRequestUrl && <p className="mt-2 text-xs text-text-muted">Completed as a local patch — no GitHub pull request was created.</p>}
+              {r.state === "COMPLETED" && !r.pullRequestUrl && (
+                <p className="mt-2 text-[12px] leading-4 text-[#5E626E]">Completed as a local patch — no GitHub pull request was created.</p>
+              )}
               {r.diff && (
-                <pre className="scroll-thin mt-3 max-h-[480px] overflow-auto rounded-md bg-background p-3 font-mono text-[11px] leading-relaxed text-text-secondary" aria-label="Diff">
+                <pre
+                  className="scroll-thin mt-2 max-h-[420px] overflow-auto rounded-lg border border-[#26282E] bg-[#141518] p-2 font-mono text-[11px] leading-relaxed text-[#8A8F98]"
+                  aria-label="Diff"
+                >
                   {r.diff}
                 </pre>
               )}
-            </Panel>
+            </RailCard>
           )}
 
           {(r.remoteExecutions ?? []).length > 0 && (
-            <Panel title="Cloud executions">
-              <ul className="divide-y divide-border">
+            <RailCard icon="cloud" title="Cloud Executions">
+              <ul className="flex flex-col">
                 {(r.remoteExecutions ?? []).map((e, i) => (
-                  <li key={i} className="py-2.5 text-[13px]">
+                  <li key={i} className="border-b border-[#26282E]/60 py-2 last:border-0 first:pt-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium capitalize">{e.phase} verification</span>
+                      <span className="text-[12px] font-medium capitalize leading-[18px] text-[#ECEEF0]">{e.phase} verification</span>
                       <StatusPill tone={e.status === "SUCCEEDED" ? "success" : "danger"}>{e.status}</StatusPill>
-                      <span className="ml-auto font-mono text-[11px] text-text-muted">{e.buildId}</span>
                     </div>
-                    <p className="mt-1 font-mono text-[11px] text-text-muted">
+                    <p className="mt-0.5 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]">{e.buildId}</p>
+                    <p className="mt-0.5 text-[11px] leading-4 text-[#8A8F98]">
                       containment: {e.containmentStatus ?? "—"} · role state: {e.lifecycleState ?? "—"}
                       {e.deleteNotBefore && <> · deletion eligible after {new Date(e.deleteNotBefore).toLocaleString()}</>}
                     </p>
                   </li>
                 ))}
               </ul>
-            </Panel>
+            </RailCard>
           )}
 
-          <Panel title="Audit history">
+          <RailCard icon="history" title="Audit History">
             {audit.isLoading && <Skeleton className="h-20 w-full" />}
-            <ul className="scroll-thin max-h-[380px] space-y-1.5 overflow-auto text-xs">
+            <ul className="scroll-thin max-h-[420px] overflow-auto">
               {(audit.data ?? []).map((e) => (
-                <li key={e.id} className="flex gap-2 leading-relaxed">
-                  <span className="shrink-0 font-mono text-[11px] text-text-muted">{new Date(e.createdAt).toLocaleTimeString()}</span>
-                  <span>
-                    <span className="text-text-secondary">{e.actor}</span> · <span className="font-medium text-text-primary">{e.action}</span>
-                    {e.evidence && <span className="block truncate text-text-muted" title={e.evidence}>{e.evidence}</span>}
+                <li key={e.id} className="flex gap-2 border-b border-[#26282E]/60 py-1.5 last:border-0 first:pt-0">
+                  <span className="shrink-0 font-mono text-[10px] leading-[18px] text-[#5E626E]">{new Date(e.createdAt).toLocaleTimeString()}</span>
+                  <span className="min-w-0">
+                    <span className="text-[12px] leading-[18px] text-[#8A8F98]">{e.actor}</span>
+                    <span className="text-[12px] leading-[18px] text-[#5E626E]"> · </span>
+                    <span className="font-mono text-[11px] leading-[18px] text-[#ECEEF0]">{e.action}</span>
+                    {e.evidence && (
+                      <span className="block truncate font-mono text-[10px] leading-[14px] text-[#5E626E]" title={e.evidence}>
+                        {e.evidence}
+                      </span>
+                    )}
                   </span>
                 </li>
               ))}
               {audit.data?.length === 0 && (
-                <li className="flex items-center gap-2 text-text-muted">
-                  <CircleDashed size={13} aria-hidden /> No events yet.
+                <li className="flex items-center gap-1.5 py-2 text-[12px] leading-4 text-[#5E626E]">
+                  <Icon name="radio_button_unchecked" size={13} />
+                  No events yet.
                 </li>
               )}
             </ul>
-          </Panel>
+          </RailCard>
         </div>
       </div>
     </div>

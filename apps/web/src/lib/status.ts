@@ -17,49 +17,49 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
     config.model.configured
       ? {
           id: "planner",
-          label: "AI planner",
+          label: "Planner Model",
           tone: "ready",
           state: "Connected",
-          explanation: `${config.model.modelId} plans and reviews; ${config.model.subAgentModelId} executes coding and verification tasks.`,
+          explanation: "Planner and coding models connected.",
         }
       : {
           id: "planner",
-          label: "AI planner",
+          label: "Planner Model",
           tone: "blocked",
-          state: "Not configured",
-          explanation: "No model API key is available to the API process. Planning cannot start.",
+          state: "Unconfigured",
+          explanation: "No active API key detected in the backend host runtime.",
           recovery: "Configure MODEL_API_KEY →",
         },
     config.projectDna.configured
       ? {
           id: "dna",
-          label: "Project DNA",
+          label: "Structural Analysis",
           tone: "ready",
           state: "Available",
-          explanation: "Deterministic repository analysis and structural impact reporting are available.",
+          explanation: "Deterministic AST parser and cross-file dependency graph engine available.",
         }
       : {
           id: "dna",
-          label: "Project DNA",
+          label: "Structural Analysis",
           tone: "blocked",
-          state: "Not configured",
+          state: "Unconfigured",
           explanation: "Repository intelligence is unavailable. Runs stop before planning.",
           recovery: "Install submodule deps or set PROJECT_DNA_PATH →",
         },
     config.github.configured
       ? {
           id: "github",
-          label: "GitHub integration",
+          label: "GitHub Integration",
           tone: "ready",
           state: "Connected",
           explanation: "Draft pull requests can be created after human approval.",
         }
       : {
           id: "github",
-          label: "GitHub integration",
+          label: "GitHub Integration",
           tone: "optional",
-          state: "Not configured",
-          explanation: "Optional. Without it, verified runs complete as local patches instead of draft pull requests.",
+          state: "Disconnected",
+          explanation: "Optional. Patches will be written directly as local Git diffs without automated PR generation.",
           recovery: "Link GitHub App token →",
         },
   ];
@@ -69,14 +69,14 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
       config.execution.remoteConfigured
         ? {
             id: "execution",
-            label: "Execution provider",
+            label: "Execution Engine",
             tone: "ready",
             state: "AWS CodeBuild",
             explanation: `Builds and tests run on ${config.execution.project} in ${config.execution.region} with per-run IAM isolation.`,
           }
         : {
             id: "execution",
-            label: "Execution provider",
+            label: "Execution Engine",
             tone: "blocked",
             state: "Misconfigured",
             explanation: "AWS execution is selected but the CodeBuild project or bucket is not configured.",
@@ -86,7 +86,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
   } else if (config.sandboxMode === "docker") {
     items.push({
       id: "execution",
-      label: "Execution provider",
+      label: "Execution Engine",
       tone: "ready",
       state: "Docker sandbox",
       explanation: "Tests run in isolated, network-restricted containers.",
@@ -94,11 +94,10 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
   } else {
     items.push({
       id: "execution",
-      label: "Execution provider",
+      label: "Execution Engine",
       tone: "attention",
-      state: "Local host execution",
-      explanation: "Builds and tests run directly on this machine. Suitable for trusted code only.",
-      recovery: "Use Docker or CodeBuild for untrusted code →",
+      state: "Host sandbox",
+      explanation: "Builds and tests run directly on this host. No OS isolation — trusted repositories and fixtures only.",
     });
   }
 
@@ -106,18 +105,17 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
     config.workflowEngine === "temporal"
       ? {
           id: "workflow",
-          label: "Workflow persistence",
+          label: "Workflow Persistence",
           tone: "ready",
           state: "Temporal",
           explanation: `Durable workflows on ${config.temporalAddress ?? "the configured Temporal server"}.`,
         }
       : {
           id: "workflow",
-          label: "Workflow persistence",
-          tone: "attention",
-          state: "Local durable engine",
-          explanation: "Runs persist every transition and resume after restart. Temporal is available for production durability.",
-          recovery: "Set WORKFLOW_ENGINE=temporal with a running Temporal server for production use.",
+          label: "Workflow Persistence",
+          tone: "ready",
+          state: "Durable",
+          explanation: "Every state transition is journaled to SQLite and fully resumable after process kill.",
         },
   );
   return items;
