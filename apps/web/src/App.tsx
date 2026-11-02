@@ -1,4 +1,4 @@
-import { FlaskConical, LayoutDashboard, Plus } from "lucide-react";
+import { FlaskConical, FolderGit2, LayoutDashboard, Plus } from "lucide-react";
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useConfigStatus } from "./components/ReadinessPanel";
 import { NewAnalysis } from "./pages/NewAnalysis";
@@ -6,19 +6,11 @@ import { Overview } from "./pages/Overview";
 import { RunDetail } from "./pages/RunDetail";
 import { readinessItems } from "./lib/status";
 
-function BrandMark() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden className="shrink-0">
-      <rect x="1" y="1" width="24" height="24" rx="6" stroke="#647BFA" strokeWidth="1.6" />
-      <path d="M8.5 6.5c5 3.4 5 9.6 0 13M17.5 6.5c-5 3.4-5 9.6 0 13" stroke="#647BFA" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M10.2 10h5.6M10.2 16h5.6" stroke="#32B987" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/new", label: "New analysis", icon: Plus, end: false },
+  { to: "/#runs", label: "Runs", icon: FlaskConical, end: false },
+  { to: "/#repositories", label: "Repositories", icon: FolderGit2, end: false },
 ] as const;
 
 function Shell() {
@@ -33,7 +25,6 @@ function Shell() {
       <aside className="border-b border-border bg-background lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
         <div className="flex items-center gap-2.5 px-4 py-3.5">
           <Link to="/" className="flex items-center gap-2.5" aria-label="DNAFix home">
-            <BrandMark />
             <span className="text-[15px] font-semibold tracking-tight">DNAFix</span>
             <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-text-muted">v0.1.0</span>
           </Link>
@@ -77,8 +68,18 @@ function Shell() {
       </aside>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-10 hidden border-b border-border bg-background/95 px-6 py-3 backdrop-blur lg:block">
-          <p className="text-[13px] font-medium text-text-secondary">{pageTitle}</p>
+        <header className="sticky top-0 z-10 hidden items-center justify-between border-b border-border bg-background/95 px-6 py-2.5 backdrop-blur lg:flex">
+          <p className="text-xs text-text-muted">
+            Workspace <span className="mx-1.5 text-border-strong">/</span> <span className="font-medium text-text-primary">{pageTitle}</span>
+          </p>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium ${
+              blockers ? "border-red-500/30 bg-red-500/10 text-danger" : "border-emerald-500/30 bg-emerald-500/10 text-success-light"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${blockers ? "animate-pulse bg-danger" : "bg-success"}`} aria-hidden />
+            {config.isLoading ? "Checking" : blockers ? `${blockers} Required Action${blockers > 1 ? "s" : ""}` : "Ready"}
+          </span>
         </header>
         <main className="mx-auto w-full max-w-[1240px] px-4 py-5 sm:px-6">
           <Routes>

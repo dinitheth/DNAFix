@@ -93,19 +93,11 @@ export function ReadinessPanel({ config }: { config?: ConfigStatus }) {
               <span className={`font-mono text-[11px] font-medium ${STATE_COLOR[item.tone]}`}>{item.state}</span>
             </div>
             <p className="text-xs leading-relaxed text-text-secondary">{item.explanation}</p>
-            {(item.recovery || meta) && (
-              <div className="flex items-center justify-between gap-2 pt-1">
-                {item.recovery ? (
-                  <span className="text-xs leading-relaxed text-accent-soft">{item.recovery}</span>
-                ) : (
-                  <span />
-                )}
-                {meta && (
-                  <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-text-muted">
-                    {meta.left}
-                    {meta.right && <> &nbsp;·&nbsp; {meta.right}</>}
-                  </span>
-                )}
+            {item.recovery && <p className="pt-0.5 text-xs text-accent-soft">{item.recovery}</p>}
+            {meta && (
+              <div className="flex items-center justify-between gap-2 pt-1 font-mono text-[10px] uppercase tracking-wide text-text-muted">
+                <span className="truncate">{meta.left}</span>
+                {meta.right && <span className="shrink-0">{meta.right}</span>}
               </div>
             )}
           </article>

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { ReadinessPanel, useConfigStatus } from "../components/ReadinessPanel";
 import { Button, EmptyState, Skeleton, StatusPill } from "../components/ui";
 import { api, type RepositoryRecord, type Run } from "../lib/api";
@@ -34,6 +34,12 @@ function resultSummary(run: Run): string {
 }
 
 export function Overview() {
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash) {
+      document.querySelector(location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [location.hash]);
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs") });
   const repos = useQuery({ queryKey: ["repos"], queryFn: () => api<RepositoryRecord[]>("/repositories") });
   const config = useConfigStatus();
@@ -51,7 +57,7 @@ export function Overview() {
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div id="runs" className="mb-4 flex scroll-mt-16 flex-wrap items-center gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Runs</h1>
           <span className="text-[13px] text-text-muted">{runs.data ? `${visible.length} of ${runs.data.length}` : ""}</span>
           <div className="ml-auto flex items-center gap-2">
@@ -159,7 +165,7 @@ export function Overview() {
           </div>
         )}
 
-        <h2 className="mb-2 mt-8 text-lg font-semibold tracking-tight">Repositories</h2>
+        <h2 id="repositories" className="mb-2 mt-8 scroll-mt-16 text-lg font-semibold tracking-tight">Repositories</h2>
         {repos.data && repos.data.length === 0 && <p className="text-[13px] text-text-muted">No repositories yet. A repository is registered when you start an analysis.</p>}
         <ul className="divide-y divide-border rounded-lg border border-border bg-surface">
           {(repos.data ?? []).map((repo) => (
