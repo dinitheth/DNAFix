@@ -122,38 +122,38 @@ export function Overview() {
           />
         )}
         {visible.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-            <table className="w-full min-w-[680px] text-left text-[13px]">
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+            <table className="w-full table-fixed text-left text-[13px]">
               <thead>
                 <tr className="border-b border-border text-xs text-text-muted">
                   <th scope="col" className="px-4 py-2.5 font-medium">Issue</th>
-                  <th scope="col" className="px-4 py-2.5 font-medium">Repository</th>
-                  <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
-                  <th scope="col" className="px-4 py-2.5 font-medium">Started</th>
-                  <th scope="col" className="px-4 py-2.5 font-medium">Duration</th>
-                  <th scope="col" className="px-4 py-2.5 font-medium">Result</th>
-                  <th scope="col" className="px-4 py-2.5" aria-label="Open run" />
+                  <th scope="col" className="hidden w-[150px] px-4 py-2.5 font-medium md:table-cell">Repository</th>
+                  <th scope="col" className="w-[130px] px-4 py-2.5 font-medium">Status</th>
+                  <th scope="col" className="hidden w-[170px] px-4 py-2.5 font-medium xl:table-cell">Started</th>
+                  <th scope="col" className="hidden w-[84px] px-4 py-2.5 font-medium xl:table-cell">Duration</th>
+                  <th scope="col" className="hidden w-[180px] px-4 py-2.5 font-medium lg:table-cell">Result</th>
+                  <th scope="col" className="w-10 px-2 py-2.5" aria-label="Open run" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {visible.map((run) => (
                   <tr key={run.id} className="transition-colors hover:bg-surface-hover">
-                    <td className="max-w-[260px] px-4 py-2.5">
+                    <td className="px-4 py-2.5">
                       <Link to={`/runs/${run.id}`} className="block truncate font-medium text-text-primary hover:text-accent" title={run.issueTitle}>
                         {run.issueTitle}
                       </Link>
-                      <div className="mt-0.5 font-mono text-[10px] text-text-muted">{run.id}</div>
+                      <div className="mt-0.5 truncate font-mono text-[10px] text-text-muted">{run.id}</div>
                     </td>
-                    <td className="max-w-[180px] truncate px-4 py-3 text-text-secondary">{repositoryLabel(run, repos.data ?? [], run.repositoryId)}</td>
-                    <td className="px-4 py-3">
+                    <td className="hidden truncate px-4 py-2.5 text-text-secondary md:table-cell">{repositoryLabel(run, repos.data ?? [], run.repositoryId)}</td>
+                    <td className="px-4 py-2.5">
                       <StatusPill tone={stateTone(run.state)}>{stateLabel(run.state)}</StatusPill>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-text-secondary">{new Date(run.createdAt).toLocaleString()}</td>
-                    <td className="px-4 py-3 text-text-secondary">{formatDuration(run.createdAt, run.updatedAt)}</td>
-                    <td className="max-w-[190px] truncate px-4 py-2.5 text-text-secondary" title={resultSummary(run)}>
+                    <td className="hidden whitespace-nowrap px-4 py-2.5 text-text-secondary xl:table-cell">{new Date(run.createdAt).toLocaleString()}</td>
+                    <td className="hidden px-4 py-2.5 text-text-secondary xl:table-cell">{formatDuration(run.createdAt, run.updatedAt)}</td>
+                    <td className="hidden truncate px-4 py-2.5 text-text-secondary lg:table-cell" title={resultSummary(run)}>
                       {resultSummary(run)}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-2 py-2.5 text-right">
                       <Link to={`/runs/${run.id}`} aria-label={`Open run ${run.id}`} className="inline-flex rounded p-1 text-text-muted transition-colors hover:text-accent">
                         <ArrowRight size={15} aria-hidden />
                       </Link>
