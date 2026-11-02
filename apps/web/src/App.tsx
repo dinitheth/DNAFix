@@ -20,7 +20,7 @@ function Shell() {
   const pageTitle = location.pathname.startsWith("/runs/") ? "Run workspace" : location.pathname === "/new" ? "New analysis" : "Overview";
 
   return (
-    <div className="min-h-screen bg-background text-text-primary lg:grid lg:grid-cols-[228px_minmax(0,1fr)]">
+    <div className="min-h-screen bg-background text-text-primary lg:grid lg:grid-cols-[210px_minmax(0,1fr)]">
       {/* Sidebar (desktop) / top bar (mobile) */}
       <aside className="border-b border-border bg-background lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r">
         <div className="flex items-center gap-2.5 px-4 py-3.5">

@@ -1,4 +1,4 @@
-import { AlertTriangle, FolderOpen, GitBranch, Play, Terminal } from "lucide-react";
+import { AlertTriangle, FolderOpen, GitBranch, Play, Save, Terminal } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ReadinessPanel, useConfigStatus } from "../components/ReadinessPanel";
@@ -74,6 +74,34 @@ export function NewAnalysis() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   });
+
+  // Draft persistence (real, browser-local): restore once on mount, save on demand.
+  const [draftSaved, setDraftSaved] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("dnafix-new-analysis-draft");
+      if (!raw) return;
+      const draft = JSON.parse(raw) as Record<string, string>;
+      if (draft.source === "local" || draft.source === "github") setSource(draft.source);
+      setRepositoryPath(draft.repositoryPath ?? "");
+      setGithubOwner(draft.githubOwner ?? "");
+      setGithubRepo(draft.githubRepo ?? "");
+      setIssueTitle(draft.issueTitle ?? "");
+      setIssueBody(draft.issueBody ?? "");
+      setIssueNumber(draft.issueNumber ?? "");
+    } catch {
+      /* corrupted draft is ignored */
+    }
+  }, []);
+
+  function saveDraft() {
+    localStorage.setItem(
+      "dnafix-new-analysis-draft",
+      JSON.stringify({ source, repositoryPath, githubOwner, githubRepo, issueTitle, issueBody, issueNumber }),
+    );
+    setDraftSaved(true);
+    setTimeout(() => setDraftSaved(false), 2000);
+  }
 
   return (
     <div>
@@ -218,7 +246,10 @@ export function NewAnalysis() {
                 DNAFix analyses first. <span className="text-text-primary">You approve the plan</span> before any code changes.
               </span>
             </p>
-            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <div className="flex items-center justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={saveDraft}>
+                <Save size={14} aria-hidden /> {draftSaved ? "Draft saved" : "Save Draft"}
+              </Button>
               <Button type="submit" variant="primary" loading={submitting} disabled={submitDisabled} className="px-5">
                 Start Analysis
                 <kbd className="rounded border border-white/20 bg-black/20 px-1 py-px font-mono text-[10px] font-medium" aria-hidden>
