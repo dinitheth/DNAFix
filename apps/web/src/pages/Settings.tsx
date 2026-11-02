@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { useConfigStatus, ReadinessPanel } from "../components/ReadinessPanel";
 import { Icon } from "../components/Icon";
 import { SectionLabel, Skeleton } from "../components/ui";
@@ -30,6 +31,12 @@ function Section({ id, index, title, icon, children }: { id?: string; index: str
 export function Settings() {
   const config = useConfigStatus();
   const data: ConfigStatus | undefined = config.data;
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    if (!hash || !data) return;
+    document.querySelector(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [hash, data]);
 
   return (
     <div>
