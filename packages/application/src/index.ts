@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AuditEvent, CreateRunRequest } from "@dnafix/contracts";
 import { assertTransition, canRunInParallel, findOverlappingChanges, integrationOrder, validatePlanSemantics } from "@dnafix/domain";
 import { createCommandRunner, type CommandRunner } from "@dnafix/execution";
-import { GitWorktreeManager, cloneRepository } from "@dnafix/git-engine";
+import { GitWorktreeManager, cloneRepository, cloneRepositoryWithToken } from "@dnafix/git-engine";
 import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
 import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
 import { FileStore, type RunRecord, type Store } from "@dnafix/persistence";
@@ -69,14 +69,16 @@ export class RunService {
     } else {
       throw new Error("CreateRun requires repositoryPath or githubOwner/githubRepo");
     }
+    const existingRepository = await this.deps.store.getRepository(repositoryId);
     await this.deps.store.saveRepository({
       id: repositoryId,
       localPath: repositoryPath,
       githubOwner: req.githubOwner ?? null,
       githubRepo: req.githubRepo ?? null,
-      defaultBranch: null,
-      lastAnalyzedCommitSha: null,
-      createdAt: now(),
+      defaultBranch: existingRepository?.defaultBranch ?? null,
+      lastAnalyzedCommitSha: existingRepository?.lastAnalyzedCommitSha ?? null,
+      createdAt: existingRepository?.createdAt ?? now(),
+      githubInstallationId: req.githubInstallationId ?? existingRepository?.githubInstallationId ?? null,
     });
     const run: RunRecord = {
       id: id("run"),
@@ -108,6 +110,8 @@ export class RunService {
       idempotency: {},
       createdAt: now(),
       updatedAt: now(),
+      githubInstallationId: req.githubInstallationId ?? null,
+      issueUrl: req.issueUrl ?? null,
     };
     await this.deps.store.saveRun(run);
     await this.audit(run.id, run.repositoryId, "user", "run.created", "ok", `issue: ${req.issueTitle}`);
@@ -259,8 +263,16 @@ export class Pipeline {
         const repo = await store.getRepository(run.repositoryId);
         if (repo?.githubOwner && repo.githubRepo && !existsSync(path.join(run.repositoryPath, ".git"))) {
           await mkdir(path.dirname(run.repositoryPath), { recursive: true });
-          await cloneRepository(`https://github.com/${repo.githubOwner}/${repo.githubRepo}.git`, run.repositoryPath);
-          await this.runs.audit(run.id, run.repositoryId, "system", "repository.cloned", "ok", run.repositoryPath);
+          const url = `https://github.com/${repo.githubOwner}/${repo.githubRepo}.git`;
+          const installationId = repo.githubInstallationId ?? run.githubInstallationId ?? process.env.GITHUB_INSTALLATION_ID;
+          if (installationId && this.deps.github.appConfigured) {
+            const token = await this.deps.github.installationToken(installationId);
+            await cloneRepositoryWithToken(url, run.repositoryPath, token);
+            await this.runs.audit(run.id, run.repositoryId, "system", "repository.cloned", "ok", `authenticated installation ${installationId}`);
+          } else {
+            await cloneRepository(url, run.repositoryPath);
+            await this.runs.audit(run.id, run.repositoryId, "system", "repository.cloned", "ok", run.repositoryPath);
+          }
         }
         if (!(await worktrees.isGitRepository(run.repositoryPath))) {
           run.error = `Repository path is not a git repository: ${run.repositoryPath}`;
@@ -522,15 +534,16 @@ export class Pipeline {
           return;
         }
         const repo = await store.getRepository(run.repositoryId);
-        if (!repo?.githubOwner || !repo.githubRepo || !this.deps.github.configured) {
+        const installationId = repo?.githubInstallationId ?? run.githubInstallationId ?? process.env.GITHUB_INSTALLATION_ID;
+        if (!repo?.githubOwner || !repo.githubRepo || !this.deps.github.appConfigured || !installationId) {
           // Local-patch delivery: honest completion without GitHub.
-          await this.runs.audit(run.id, run.repositoryId, "system", "pull-request.skipped", "info", "GitHub not configured or repository is local-only; patch delivered as run diff.");
+          await this.runs.audit(run.id, run.repositoryId, "system", "pull-request.skipped", "info", "GitHub App is not configured for this repository or repository is local-only; patch delivered as run diff.");
           run = await this.runs.transition(run, "COMPLETED");
           return;
         }
         const branch = `dnafix/${run.id}/integration`;
-        const token = await this.deps.github.pushToken();
-        await worktrees.pushBranch(integration.path, `https://x-access-token:${token}@github.com/${repo.githubOwner}/${repo.githubRepo}.git`, branch);
+        const token = await this.deps.github.pushToken(installationId);
+        await worktrees.pushBranchWithToken(integration.path, `https://github.com/${repo.githubOwner}/${repo.githubRepo}.git`, branch, token);
         const prBody = buildPrBody(run);
         const pr = await this.deps.github.createDraftPullRequest({
           owner: repo.githubOwner,
@@ -539,6 +552,7 @@ export class Pipeline {
           body: prBody,
           head: branch,
           base: repo.defaultBranch ?? "main",
+          installationId,
         });
         run.pullRequestUrl = pr.url;
         run.pullRequestNumber = pr.number;

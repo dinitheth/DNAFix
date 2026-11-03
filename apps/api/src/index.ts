@@ -5,25 +5,58 @@ import Fastify from "fastify";
 import { z } from "zod";
 import { Pipeline, RunService, createDefaultDeps } from "@dnafix/application";
 import { CreateRunRequestSchema } from "@dnafix/contracts";
-import { verifyWebhookSignature } from "@dnafix/github";
+import { GitHubError, GitHubIntegrationService, GitHubNotConfiguredError, verifyWebhookSignature } from "@dnafix/github";
+import { GitHubConnectionManager, readGitHubSessionId, registerGitHubRoutes } from "./github.js";
 
 const deps = createDefaultDeps();
 const runs = new RunService(deps);
 const pipeline = new Pipeline(deps);
 const app = Fastify({ logger: true });
+const githubIntegration = new GitHubIntegrationService();
+const githubConnections = new GitHubConnectionManager(githubIntegration, deps.store);
 
 await app.register(cors, { origin: process.env.WEB_ORIGIN ?? "http://localhost:5173" });
 await app.register(swagger, { openapi: { info: { title: "DNAFix API", version: "0.1.0" } } });
 await app.register(swaggerUi, { routePrefix: "/docs" });
 
+if (!githubIntegration.configured) {
+  app.log.warn({ missing: githubIntegration.missingConfiguration }, "GitHub App user integration is not configured");
+}
+
 const sessionToken = process.env.DNAFIX_SESSION_TOKEN;
 app.addHook("onRequest", async (req, reply) => {
   if (!sessionToken) return;
-  if (req.url === "/health" || req.url.startsWith("/api/v1/webhooks/") || req.url.startsWith("/docs")) return;
+  if (
+    req.url === "/health" ||
+    req.url.startsWith("/api/v1/webhooks/") ||
+    req.url.startsWith("/docs") ||
+    req.url.startsWith("/api/v1/integrations/github/callback") ||
+    req.url.startsWith("/api/v1/integrations/github/setup")
+  )
+    return;
   if (req.headers.authorization !== `Bearer ${sessionToken}`) {
     return reply.code(401).send({ error: "Unauthorized: missing or invalid session token" });
   }
 });
+
+app.setErrorHandler((error, req, reply) => {
+  if (error instanceof GitHubError) {
+    return reply.code(error.status ?? 500).send({
+      error: error.message,
+      code: error.code,
+      ...(error instanceof GitHubNotConfiguredError ? { missing: error.missing } : {}),
+    });
+  }
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({ error: error.issues, code: "invalid_request" });
+  }
+  req.log.error({ err: error }, "unhandled request error");
+  return reply.code(500).send({ error: "Internal server error" });
+});
+
+// Register after the auth hook and error handler so every integration route is
+// covered by the optional bearer gate and the structured GitHub error mapping.
+registerGitHubRoutes(app, { manager: githubConnections, integration: githubIntegration });
 
 function kick(runId: string): void {
   void pipeline.process(runId).catch((err: Error) => app.log.error({ err, runId }, "pipeline error"));
@@ -41,7 +74,13 @@ app.get("/api/v1/config/status", async () => ({
     baseUrl: process.env.MODEL_API_BASE_URL ?? "https://api.meta.ai/v1",
   },
   projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH), path: process.env.PROJECT_DNA_PATH ?? null },
-  github: { configured: deps.github.configured },
+  github: {
+    configured: deps.github.configured,
+    appConfigured: deps.github.appConfigured,
+    userIntegrationConfigured: githubIntegration.configured,
+    missing: githubIntegration.missingConfiguration,
+    slug: githubIntegration.config.slug,
+  },
   sandboxMode: deps.runner.mode,
   execution: {
     provider: process.env.DNAFIX_EXECUTION_PROVIDER === "codebuild" ? "codebuild" : "local",
@@ -59,7 +98,23 @@ app.get("/api/v1/repositories", async () => deps.store.listRepositories());
 app.post("/api/v1/runs", async (req, reply) => {
   const parsed = CreateRunRequestSchema.safeParse(req.body);
   if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues });
-  const run = await runs.createRun(parsed.data);
+  let request = parsed.data;
+  if (request.githubInstallationId !== undefined || request.issueUrl !== undefined) {
+    const sessionId = readGitHubSessionId(req);
+    if (!sessionId) return reply.code(401).send({ error: "GitHub provenance requires a connected GitHub session. Connect GitHub again.", code: "authentication_required" });
+    const provenance = await githubConnections.validateRunProvenance(sessionId, request);
+    const [owner, repo] = provenance.repositoryFullName.split("/");
+    if (!owner || !repo) return reply.code(400).send({ error: "GitHub provenance did not resolve to a valid repository.", code: "invalid_request" });
+    request = {
+      ...request,
+      githubOwner: owner,
+      githubRepo: repo,
+      githubInstallationId: provenance.installationId,
+      issueUrl: provenance.issueUrl ?? undefined,
+      issueNumber: provenance.issueNumber ?? request.issueNumber,
+    };
+  }
+  const run = await runs.createRun(request);
   kick(run.id);
   return reply.code(201).send(run);
 });

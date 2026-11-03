@@ -18,6 +18,34 @@ export interface RepositoryRecord {
   defaultBranch: string | null;
   lastAnalyzedCommitSha: string | null;
   createdAt: string;
+  /** Verified GitHub App installation that grants access to this repository. */
+  githubInstallationId?: number | null;
+}
+
+/**
+ * One connected GitHub account per DNAFix session. Token fields are AES-256-GCM
+ * ciphertext; plaintext tokens never enter this record or the JSON database.
+ */
+export interface GitHubConnectionRecord {
+  id: string;
+  sessionId: string;
+  githubUserId: number;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  htmlUrl: string;
+  installationId: number | null;
+  installationAccountLogin: string | null;
+  installationAccountType: string | null;
+  accessTokenCiphertext: string;
+  refreshTokenCiphertext: string | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
+  scopes: string[];
+  tokenType: string;
+  createdAt: string;
+  updatedAt: string;
+  lastVerifiedAt: string | null;
 }
 
 export interface RemoteExecutionRecord {
@@ -92,6 +120,9 @@ export interface RunRecord {
   idempotency: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+  /** Provenance for an analysis seeded from a real GitHub issue (optional for historical runs). */
+  githubInstallationId?: number | null;
+  issueUrl?: string | null;
 }
 
 export interface Store {
@@ -103,15 +134,19 @@ export interface Store {
   listRuns(): Promise<RunRecord[]>;
   appendAudit(event: AuditEvent): Promise<void>;
   listAudit(runId?: string): Promise<AuditEvent[]>;
+  saveGitHubConnection(connection: GitHubConnectionRecord): Promise<void>;
+  getGitHubConnection(sessionId: string): Promise<GitHubConnectionRecord | null>;
+  deleteGitHubConnection(sessionId: string): Promise<void>;
 }
 
 interface DbShape {
   repositories: RepositoryRecord[];
   runs: RunRecord[];
   audit: AuditEvent[];
+  githubConnections: GitHubConnectionRecord[];
 }
 
-const emptyDb = (): DbShape => ({ repositories: [], runs: [], audit: [] });
+const emptyDb = (): DbShape => ({ repositories: [], runs: [], audit: [], githubConnections: [] });
 
 export class MemoryStore implements Store {
   private db: DbShape = emptyDb();
@@ -139,6 +174,16 @@ export class MemoryStore implements Store {
   async listAudit(runId?: string): Promise<AuditEvent[]> {
     return this.db.audit.filter((e) => !runId || e.runId === runId);
   }
+  async saveGitHubConnection(connection: GitHubConnectionRecord): Promise<void> {
+    this.db.githubConnections = [...this.db.githubConnections.filter((c) => c.sessionId !== connection.sessionId), structuredClone(connection)];
+  }
+  async getGitHubConnection(sessionId: string): Promise<GitHubConnectionRecord | null> {
+    const connection = this.db.githubConnections.find((c) => c.sessionId === sessionId);
+    return connection ? structuredClone(connection) : null;
+  }
+  async deleteGitHubConnection(sessionId: string): Promise<void> {
+    this.db.githubConnections = this.db.githubConnections.filter((c) => c.sessionId !== sessionId);
+  }
 }
 
 /** JSON-file store for single-user local development. Atomic replace on every write. Postgres schema lives in ./drizzle-schema.ts + migrations/. */
@@ -150,7 +195,13 @@ export class FileStore implements Store {
   private async load(): Promise<DbShape> {
     if (this.db) return this.db;
     try {
-      this.db = JSON.parse(await readFile(this.filePath, "utf8")) as DbShape;
+      const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as Partial<DbShape>;
+      this.db = {
+        repositories: parsed.repositories ?? [],
+        runs: parsed.runs ?? [],
+        audit: parsed.audit ?? [],
+        githubConnections: parsed.githubConnections ?? [],
+      };
     } catch {
       this.db = emptyDb();
     }
@@ -209,5 +260,19 @@ export class FileStore implements Store {
   }
   async listAudit(runId?: string): Promise<AuditEvent[]> {
     return (await this.load()).audit.filter((e) => !runId || e.runId === runId);
+  }
+  async saveGitHubConnection(connection: GitHubConnectionRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.githubConnections = [...db.githubConnections.filter((c) => c.sessionId !== connection.sessionId), structuredClone(connection)];
+    });
+  }
+  async getGitHubConnection(sessionId: string): Promise<GitHubConnectionRecord | null> {
+    const connection = (await this.load()).githubConnections.find((c) => c.sessionId === sessionId);
+    return connection ? structuredClone(connection) : null;
+  }
+  async deleteGitHubConnection(sessionId: string): Promise<void> {
+    await this.mutate((db) => {
+      db.githubConnections = db.githubConnections.filter((c) => c.sessionId !== sessionId);
+    });
   }
 }

@@ -41,6 +41,9 @@ importers:
       '@dnafix/github':
         specifier: workspace:*
         version: link:../../packages/github
+      '@dnafix/persistence':
+        specifier: workspace:*
+        version: link:../../packages/persistence
       '@fastify/cors':
         specifier: ^10.0.1
         version: 10.1.0

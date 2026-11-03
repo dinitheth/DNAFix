@@ -228,7 +228,7 @@ Every transition is validated (`canTransition`/`assertTransition`), persisted, a
 | `packages/execution` | Command allowlist policy, environment scrubbing, host/Docker runners | `validateArgv`, `HostCommandRunner`, `DockerCommandRunner` |
 | `packages/verification` | Test discovery from `package.json`, baseline vs final runs, diff-vs-impact comparison | `discoverChecks`, `runChecks`, `compareImpact` |
 | `packages/agent-orchestrator` | Scope-enforced patch application (deny-by-default deletions), coding/verifier agents | `applyPatchOperations`, `CodingAgent` |
-| `packages/github` | GitHub App JWT auth, issue/PR REST adapter, webhook HMAC | `GitHubAdapter` (draft PR only; no merge method exists) |
+| `packages/github` | GitHub App JWT auth, user OAuth + installation/repository/issue integration (token encryption, ETag cache, pagination), issue/PR REST adapter, webhook HMAC | `GitHubIntegrationService`, `GitHubAdapter` (draft PR only; no merge method exists) |
 | `packages/persistence` | Store port; JSON file store (dev), memory store (tests), PostgreSQL Drizzle schema + migration | `Store`, `FileStore` |
 | `packages/remote-execution` | Remote execution port + AWS CodeBuild adapter (CLI-based; no AWS SDK coupling) | `RemoteExecutionProvider`, `CodeBuildExecutionProvider` |
 
@@ -340,6 +340,12 @@ Models return structured patch operations — `create`, `replace` (exact-anchor,
 
 ## GitHub delivery policy
 
+**Source integration.** DNAFix can connect a GitHub account through a GitHub App, discover the App installations the account can access, browse and search their repositories, and read or search real issues. Selecting an issue imports its exact title, Markdown body and number into the New Analysis form; the run keeps the issue URL and installation as provenance, and the backend re-validates both before accepting the run. Tokens never reach the browser: user/refresh tokens are encrypted at rest with AES-256-GCM, installation tokens are cached in API memory only, and OAuth state is single-use, short-lived and bound to an HttpOnly session cookie. Setup, permissions and environment values are documented in [`docs/GITHUB_APP_SETUP.md`](docs/GITHUB_APP_SETUP.md).
+
+The live connection/import path is **implemented but not yet verified against GitHub**, because no App credentials are configured in this environment. Units and API routes are tested with mocked GitHub responses only.
+
+**Delivery.** The following applies to the separate draft-PR path:
+
 - GitHub App authentication (RS256 JWT → short-lived installation tokens); webhook payloads are HMAC-SHA256 verified with constant-time comparison.
 - Branch publication and draft-PR creation happen **only** after an explicit recorded human approval, using a generated branch name (`dnafix/<run>/integration`) and an idempotency record.
 - The adapter always creates **draft** pull requests and exposes **no merge capability at all**. DNAFix never pushes to a default branch and never closes the originating issue.
@@ -379,11 +385,33 @@ Base path `/api/v1`. OpenAPI UI is served at `/docs`. When `DNAFIX_SESSION_TOKEN
 
 All request/response bodies are Zod-validated; schemas live in `packages/contracts`.
 
+### GitHub App integration routes
+
+These routes are registered whether or not the App is configured; unconfigured routes fail with `503 not_configured` rather than pretending to connect.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/v1/integrations/github/status` | Configuration, connection, account and installation state |
+| POST | `/api/v1/integrations/github/connect` | Begin user authorization (returns the GitHub authorize URL) |
+| GET | `/api/v1/integrations/github/callback` | Single-use OAuth callback; stores encrypted tokens |
+| GET | `/api/v1/integrations/github/setup` | Post-install return target |
+| GET | `/api/v1/integrations/github/installations` | List accessible App installations |
+| POST | `/api/v1/integrations/github/installations/start` | Begin App installation (returns the install URL) |
+| POST | `/api/v1/integrations/github/installations/select` | Select an accessible installation |
+| GET | `/api/v1/integrations/github/repositories` | Paged, searchable authorized repositories |
+| POST | `/api/v1/integrations/github/repositories/select` | Validate and select a repository |
+| GET | `/api/v1/integrations/github/repositories/:owner/:repo/issues` | Issue search/list (pull requests excluded) |
+| GET | `/api/v1/integrations/github/repositories/:owner/:repo/issues/:number` | Full issue detail with ETag revalidation |
+| POST | `/api/v1/integrations/github/refresh` | Refresh tokens/connection metadata |
+| POST | `/api/v1/integrations/github/disconnect` | Revoke the grant/installation token and delete the record |
+
+The exact path shapes are defined in `apps/api/src/github.ts`; session cookies are `HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS origins, and tokens are never included in responses.
+
 ---
 
 ## Web application
 
-React + Vite + Tailwind + TanStack Query + React Router. Screens: run dashboard with live integration-status banners (unconfigured integrations are labelled, never hidden), repository list, issue submission, run detail with Project DNA evidence (including completeness/truncation warnings), issue analysis, implementation plan with approval action, clarification answering, agent task execution, verification evidence with the actual diff, PR approval, draft-PR link, and the full audit history. The dashboard renders real backend state only — there are no mock counters or simulated activity anywhere in the product path.
+React + Vite + Tailwind + TanStack Query + React Router. Screens: run dashboard with live integration-status banners (unconfigured integrations are labelled, never hidden), repository list, issue submission with a progressive GitHub source panel (connect → installation → repository → issue, or manual entry), run detail with Project DNA evidence (including completeness/truncation warnings), issue analysis, implementation plan with approval action, clarification answering, agent task execution, verification evidence with the actual diff, PR approval, draft-PR link, and the full audit history. The dashboard renders real backend state only — there are no mock counters or simulated activity anywhere in the product path.
 
 ---
 
@@ -404,7 +432,9 @@ Copy `.env.example` to `.env`. No real secrets are ever committed; `.env` is git
 | `MODEL_TRANSPORT` | `responses` | `responses` or `chat-completions` |
 | `MUSE_REASONING_EFFORT` | *(unset)* | Optional reasoning effort |
 | `PROJECT_DNA_PATH` | *(required for analysis)* | Path to a Project DNA checkout (`pnpm install` completed under Node 22.23.2) |
-| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_INSTALLATION_ID`, `GITHUB_WEBHOOK_SECRET` | *(optional)* | GitHub App integration (draft PRs) |
+| `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY_BASE64` (or `GITHUB_APP_PRIVATE_KEY`), `GITHUB_APP_SLUG`, `GITHUB_TOKEN_ENCRYPTION_KEY` | *(optional)* | GitHub App user connection, repository/issue import and draft PRs — see `docs/GITHUB_APP_SETUP.md` |
+| `GITHUB_INSTALLATION_ID`, `GITHUB_WEBHOOK_SECRET` | *(optional)* | Optional legacy installation for draft-PR delivery and webhook verification |
+| `APP_BASE_URL` | `http://localhost:3001` | Public API origin used to derive OAuth callback/setup URLs |
 | `DATABASE_URL` | *(optional)* | PostgreSQL (production persistence) |
 | `WORKFLOW_ENGINE` | `in-process` | `in-process` or `temporal` |
 | `TEMPORAL_ADDRESS` | *(unset)* | Temporal server (with `docker compose up`) |
@@ -472,12 +502,12 @@ pnpm test
 PROJECT_DNA_PATH=<checkout> pnpm vitest run tests/integration/project-dna-bridge.test.ts
 ```
 
-Latest verified result (Node 22.23.2, pnpm 9.15.4): typecheck **exit 0**, lint **exit 0**, build **exit 0**, tests **46 passed, 1 skipped** (the Project DNA bridge test, which passes when `PROJECT_DNA_PATH` is set).
+Latest verified result (Node 22.23.2, pnpm 9.15.4): typecheck **exit 0**, lint **exit 0**, build **exit 0**, tests **145 passed, 1 skipped** (the Project DNA bridge test, which passes when `PROJECT_DNA_PATH` is set).
 
 | Level | Coverage |
 |---|---|
 | Unit | Lifecycle transitions, plan/task validation, scope + deletion policy, overlap/parallelism rules, command policy and env scrubbing, budget reservation/dynamic caps |
-| Contract | Meta transport request shape + schema rejection + incomplete-response usage (mocked fetch), GitHub webhook HMAC / App JWT / draft-only PR payload (mocked fetch), Project DNA adapter misconfiguration, CodeBuild provider command construction (fake CLI) |
+| Contract | Meta transport request shape + schema rejection + incomplete-response usage (mocked fetch), GitHub webhook HMAC / App JWT / draft-only PR payload (mocked fetch), GitHub App OAuth state/token exchange/refresh, encrypted token storage, repository and issue pagination/ETag handling, disconnect revocation, import overwrite safeguards, Project DNA adapter misconfiguration, CodeBuild provider command construction (fake CLI) |
 | Integration | Git worktree lifecycle incl. validated reuse and reset, offline end-to-end pipeline (failing baseline → verified patch → local delivery), repair-deletion guard (audit + never-committed), real Project DNA bridge analysis against a fixture |
 | Security-focused | Path traversal/symlink escape, shell metacharacter injection, out-of-scope patches, unapproved deletions, secret scrubbing, invalid webhook signatures |
 

@@ -202,6 +202,10 @@ export const CreateRunRequestSchema = z.object({
   issueBody: z.string().min(1).max(50_000),
   issueNumber: z.number().int().positive().optional(),
   baseRef: z.string().min(1).max(200).optional(),
+  /** Verified GitHub App installation selected by the backend, never trusted from the browser without validation. */
+  githubInstallationId: z.number().int().positive().optional(),
+  /** Canonical GitHub issue URL retained as provenance for imported issues. */
+  issueUrl: z.string().url().max(500).optional(),
 });
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
 

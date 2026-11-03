@@ -1,17 +1,40 @@
 const API = "/api/v1";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null = null,
+    readonly missing: string[] = [],
+    readonly retryAt: string | null = null,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...init });
+  const res = await fetch(`${API}${path}`, {
+    credentials: "same-origin",
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
   if (!res.ok) {
     const text = await res.text();
     let message = text;
+    let code: string | null = null;
+    let missing: string[] = [];
     try {
-      const parsed = JSON.parse(text) as { error?: unknown };
-      message = typeof parsed.error === "string" ? parsed.error : JSON.stringify(parsed.error ?? parsed);
+      const parsed = JSON.parse(text) as { error?: unknown; code?: unknown; missing?: unknown };
+      if (typeof parsed.error === "string") message = parsed.error;
+      else if (Array.isArray(parsed.error)) message = parsed.error.map((issue) => (typeof issue === "object" && issue && "message" in issue ? String((issue as { message: unknown }).message) : String(issue))).join("; ");
+      else message = JSON.stringify(parsed.error ?? parsed);
+      code = typeof parsed.code === "string" ? parsed.code : null;
+      missing = Array.isArray(parsed.missing) ? parsed.missing.filter((value): value is string => typeof value === "string") : [];
     } catch {
       /* keep raw text */
     }
-    throw new Error(`${res.status}: ${message}`);
+    throw new ApiError(`${res.status}: ${message}`, res.status, code, missing, res.headers.get("retry-after"));
   }
   return (await res.json()) as T;
 }
@@ -23,12 +46,19 @@ export interface RepositoryRecord {
   githubRepo: string | null;
   defaultBranch: string | null;
   lastAnalyzedCommitSha: string | null;
+  githubInstallationId?: number | null;
 }
 
 export interface ConfigStatus {
   model: { provider: string; modelId: string; subAgentModelId: string; configured: boolean; transport: string; baseUrl: string };
   projectDna: { configured: boolean; path: string | null };
-  github: { configured: boolean };
+  github: {
+    configured: boolean;
+    appConfigured?: boolean;
+    userIntegrationConfigured?: boolean;
+    missing?: string[];
+    slug?: string | null;
+  };
   sandboxMode: string;
   execution: { provider: string; remoteConfigured: boolean; project: string | null; bucket: string | null; region: string };
   workflowEngine: string;
@@ -48,6 +78,8 @@ export interface Run {
   issueTitle: string;
   issueBody: string;
   issueNumber: number | null;
+  issueUrl?: string | null;
+  githubInstallationId?: number | null;
   state: string;
   modelProvider: string;
   workflowEngine: string;
@@ -103,4 +135,120 @@ export interface AuditEvent {
   result: string;
   evidence: string | null;
   createdAt: string;
+}
+
+/* ------------------------- GitHub integration ------------------------- */
+
+export interface GitHubStatus {
+  configured: boolean;
+  missing: string[];
+  appSlug: string | null;
+  webBaseUrl: string;
+  connected: boolean;
+  account: { id: number; login: string; name: string | null; avatarUrl: string | null; htmlUrl: string } | null;
+  installation: { id: number; accountLogin: string; accountType: string | null } | null;
+  tokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
+  authorizationExpired: boolean;
+  lastVerifiedAt: string | null;
+}
+
+export interface GitHubInstallation {
+  id: number;
+  accountLogin: string;
+  accountType: string;
+  avatarUrl: string | null;
+  repositorySelection: string;
+  suspended: boolean;
+  htmlUrl: string | null;
+}
+
+export interface GitHubInstallationsResponse {
+  installations: GitHubInstallation[];
+  selectedInstallationId: number | null;
+  account: { login: string };
+}
+
+export interface GitHubRepository {
+  id: number;
+  owner: string;
+  ownerAvatarUrl: string | null;
+  ownerType: string | null;
+  name: string;
+  fullName: string;
+  private: boolean;
+  visibility: string;
+  description: string | null;
+  defaultBranch: string;
+  language: string | null;
+  updatedAt: string;
+  htmlUrl: string;
+  cloneUrl: string;
+}
+
+export interface GitHubRepositoryPage {
+  repositories: GitHubRepository[];
+  owners: Array<{ login: string; type: string; avatarUrl: string | null }>;
+  page: number;
+  perPage: number;
+  totalCount: number;
+  hasNext: boolean;
+  installation: { id: number; accountLogin: string };
+  fetchedAt: string;
+  cached: boolean;
+}
+
+export interface GitHubIssueLabel {
+  name: string;
+  color: string | null;
+}
+
+export interface GitHubIssueSummary {
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string; avatarUrl: string | null } | null;
+  labels: GitHubIssueLabel[];
+  assignees: string[];
+  createdAt: string;
+  updatedAt: string;
+  comments: number;
+  htmlUrl: string;
+}
+
+export interface GitHubIssueDetail extends GitHubIssueSummary {
+  body: string | null;
+  closedAt: string | null;
+  milestone: string | null;
+  repositoryFullName: string;
+  isPullRequest: false;
+}
+
+export interface GitHubIssuePage {
+  items: GitHubIssueSummary[];
+  page: number;
+  perPage: number;
+  hasNext: boolean;
+  totalCount: number | null;
+  source: "issues" | "search";
+  repositoryFullName: string;
+}
+
+export interface GitHubIssueDetailResponse {
+  issue: GitHubIssueDetail;
+  fetchedAt: string;
+  validatedAt: string;
+  cached: boolean;
+  etag: string | null;
+  installationId: number;
+}
+
+export interface GitHubConnectResponse {
+  authorizeUrl: string;
+  expiresInSeconds: number;
+}
+
+export interface GitHubSelectRepositoryResponse {
+  repository: GitHubRepository;
+  record: RepositoryRecord;
 }

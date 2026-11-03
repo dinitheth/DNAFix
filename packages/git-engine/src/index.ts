@@ -226,6 +226,28 @@ export class GitWorktreeManager {
     await git(worktreePath, ["push", remoteUrlWithToken, `HEAD:refs/heads/${branch}`]);
   }
 
+  /** Push without placing the installation token in the remote URL or argv. */
+  async pushBranchWithToken(worktreePath: string, remoteUrl: string, branch: string, token: string): Promise<void> {
+    if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/.test(remoteUrl)) throw new GitError(`Refusing to push to non-GitHub or malformed URL: ${remoteUrl}`);
+    if (!/^dnafix\/[a-zA-Z0-9-_\/]+$/.test(branch)) throw new GitError(`Refusing to push unexpected branch: ${branch}`);
+    if (!token) throw new GitError("Refusing to push without an installation token");
+    const header = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+    const env = {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: header,
+    };
+    await exec("git", ["push", remoteUrl, `HEAD:refs/heads/${branch}`], { cwd: worktreePath, timeout: 300_000, windowsHide: true, env }).catch(
+      (err: Error & { stderr?: string }) => {
+        const encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
+        const redact = (text: string) => text.split(token).join("[redacted]").split(encoded).join("[redacted]");
+        throw new GitError(`git push failed: ${redact(err.message)}`, redact(err.stderr ?? ""));
+      },
+    );
+  }
+
   async removeWorktree(repoPath: string, worktreePath: string, opts: { force?: boolean; hasActiveTask?: boolean } = {}): Promise<void> {
     if (opts.hasActiveTask) throw new GitError("Refusing to delete a worktree with an active task");
     const args = ["worktree", "remove", worktreePath];
@@ -249,6 +271,37 @@ export async function cloneRepository(url: string, dest: string, ref?: string): 
   const args = ["clone", "--no-checkout", url, dest];
   await exec("git", args, { timeout: 300_000, windowsHide: true }).catch((err: Error & { stderr?: string }) => {
     throw new GitError(`git clone failed: ${err.message}`, err.stderr ?? "");
+  });
+  if (ref) await git(dest, ["checkout", ref]);
+}
+
+function redactToken(text: string, token: string): string {
+  const encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return text.split(token).join("[redacted]").split(encoded).join("[redacted]");
+}
+
+/**
+ * Clone a private GitHub repository with an installation access token.
+ * The credential is passed through Git's environment-based config so it never
+ * appears in argv or in a persisted remote URL, and it is redacted from errors.
+ */
+export async function cloneRepositoryWithToken(url: string, dest: string, token: string, ref?: string): Promise<void> {
+  if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/.test(url)) {
+    throw new GitError(`Refusing to clone non-GitHub or malformed URL: ${url}`);
+  }
+  if (!token) throw new GitError("Refusing to clone a private repository without an installation token");
+  const header = `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+  const env = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_0: header,
+  };
+  const args = ["clone", "--no-checkout", url, dest];
+  await exec("git", args, { timeout: 300_000, windowsHide: true, env }).catch((err: Error & { stderr?: string }) => {
+    const message = redactToken(err.message, token);
+    throw new GitError(`git clone failed: ${message}`, redactToken(err.stderr ?? "", token));
   });
   if (ref) await git(dest, ["checkout", ref]);
 }

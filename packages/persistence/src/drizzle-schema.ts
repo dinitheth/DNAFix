@@ -8,6 +8,7 @@
 export const TABLES = [
   "users",
   "github_installations",
+  "github_user_connections",
   "repositories",
   "workflow_runs",
   "repository_analysis_snapshots",

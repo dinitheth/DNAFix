@@ -13,7 +13,7 @@ DNAFix is a modular monolith (ADR-0001) with separately runnable API, web and wo
 | `packages/git-engine` | Worktree lifecycle, diff collection, changed-path and overlap detection, ordered integration. |
 | `packages/execution` | Command policy (argv allowlist, env scrub, timeouts, output caps), host runner (explicit dev opt-in), Docker runner (hardened flags). |
 | `packages/verification` | Test discovery, baseline/post runs, diff-vs-impact comparison, verification report. |
-| `packages/github` | GitHub App auth (RS256 JWT → installation token), issue/PR REST adapter, webhook HMAC verification. |
+| `packages/github` | GitHub App auth (RS256 JWT → installation token), user OAuth connection, repository/issue discovery with encryption and ETag caching, issue/PR REST adapter, webhook HMAC verification. |
 | `packages/persistence` | `Store` port; JSON file store (dev default) and memory store (tests); Drizzle schema + SQL migration for PostgreSQL. |
 | `packages/agent-orchestrator` | Lead-planner flow, coding-agent patch application under scope, verifier review, bounded repair loop. |
 | `packages/application` | Use cases: CreateRun, ApprovePlan, ApprovePullRequest, CancelRun; the durable pipeline runner. |
@@ -31,7 +31,7 @@ A file is "affected" only with a repository path plus Project DNA or diff eviden
 
 ## Data flow (one run)
 
-1. API creates a run (repository path or GitHub repo + issue text/number) and persists it `QUEUED`.
+1. API creates a run (repository path or GitHub repo + issue text/number). A GitHub run may carry `issueUrl` and `githubInstallationId` provenance imported from the App; the API re-validates the installation, repository and issue before persisting it `QUEUED`.
 2. Worker prepares a detached worktree at the pinned base commit, records baseline test results.
 3. Project DNA bridge analyses that exact commit; snapshot stores repositoryId, analysisVersion, baseCommitSha, completeness/truncations.
 4. Muse Wonder receives bounded evidence (architecture summary, impact results for model-nominated targets resolved against the real tree, relevant file excerpts) and returns a Zod-validated plan. Ambiguity → `NEEDS_CLARIFICATION`.

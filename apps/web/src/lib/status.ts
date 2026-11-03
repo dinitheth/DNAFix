@@ -46,21 +46,23 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           explanation: "Repository intelligence is unavailable. Runs stop before planning.",
           recovery: "Install submodule deps or set PROJECT_DNA_PATH →",
         },
-    config.github.configured
+    (config.github.userIntegrationConfigured ?? config.github.configured)
       ? {
           id: "github",
           label: "GitHub Integration",
           tone: "ready",
-          state: "Connected",
-          explanation: "Draft pull requests can be created after human approval.",
+          state: "App configured",
+          explanation: "GitHub App credentials are present. Connect your account in New Analysis to browse repositories and issues.",
         }
       : {
           id: "github",
           label: "GitHub Integration",
           tone: "optional",
-          state: "Disconnected",
-          explanation: "Optional. Patches will be written directly as local Git diffs without automated PR generation.",
-          recovery: "Link GitHub App token →",
+          state: "Not configured",
+          explanation: config.github.missing?.length
+            ? `Optional. Missing: ${config.github.missing.join(", ")}.`
+            : "Optional. Patches will be written directly as local Git diffs without automated PR generation.",
+          recovery: "See docs/GITHUB_APP_SETUP.md →",
         },
   ];
 
