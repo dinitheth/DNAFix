@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ImplementationPlan, ImplementationTask } from "@dnafix/contracts";
-import { assertTransition, canTransition, InvalidTransitionError } from "./workflow.js";
+import { WORKFLOW_STATES, type ImplementationPlan, type ImplementationTask } from "@dnafix/contracts";
+import { assertTransition, canTransition, isDrivable, isPaused, isTerminal, InvalidTransitionError } from "./workflow.js";
 import { assertOperationsInScope, isPathInScope, ScopeViolationError } from "./scope.js";
 import { canRunInParallel, findOverlappingChanges, integrationOrder, PlanValidationError, validatePlanSemantics } from "./plan.js";
 
@@ -36,6 +36,24 @@ describe("workflow state machine", () => {
   it("rejects skipping states and leaving terminal states", () => {
     expect(canTransition("QUEUED", "COMPLETED")).toBe(false);
     expect(() => assertTransition("COMPLETED", "QUEUED")).toThrow(InvalidTransitionError);
+  });
+  it("marks exactly the in-progress states as drivable", () => {
+    const drivable = WORKFLOW_STATES.filter(isDrivable);
+    expect(drivable).toEqual([
+      "QUEUED",
+      "REPOSITORY_PREPARATION",
+      "BASELINE_VERIFICATION",
+      "PROJECT_DNA_ANALYSIS",
+      "IMPACT_ANALYSIS",
+      "ISSUE_PLANNING",
+      "AGENT_EXECUTION",
+      "TASK_INTEGRATION",
+      "FINAL_VERIFICATION",
+      "PULL_REQUEST_CREATION",
+    ]);
+    // Everything a human has to decide on, and everything finished, is excluded —
+    // a poller must never walk past an approval gate.
+    expect(drivable.filter((state) => isPaused(state) || isTerminal(state))).toEqual([]);
   });
 });
 

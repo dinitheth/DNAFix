@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AuditEvent, CreateRunRequest } from "@dnafix/contracts";
-import { assertTransition, canRunInParallel, findOverlappingChanges, integrationOrder, validatePlanSemantics } from "@dnafix/domain";
+import { assertTransition, canRunInParallel, findOverlappingChanges, integrationOrder, isDrivable, validatePlanSemantics } from "@dnafix/domain";
 import { createCommandRunner, type CommandRunner } from "@dnafix/execution";
 import { GitWorktreeManager, cloneRepository, cloneRepositoryWithToken } from "@dnafix/git-engine";
 import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
@@ -129,6 +129,12 @@ const id = (prefix: string) => `${prefix}_${randomUUID().slice(0, 12)}`;
 const STORE_MANAGED_FIELDS: (keyof RunRecord)[] = ["revision", "updatedAt"];
 const TERMINAL_STATES: RunRecord["state"][] = ["COMPLETED", "FAILED", "CANCELLED"];
 const STALE_WRITE_ATTEMPTS = 3;
+/**
+ * How long a driver may hold a run without writing. It has to outlast the longest
+ * call that happens between writes — a remote verification job — or a healthy run
+ * would look abandoned and be driven twice.
+ */
+const DEFAULT_LEASE_TTL_MS = 30 * 60_000;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -153,8 +159,15 @@ export class RunConflictError extends Error {
 export class RunService {
   /** The row each writer last saw or wrote, per run, so a rejected write can be re-applied field by field. */
   private readonly baselines = new Map<string, RunRecord>();
+  /** This process, as other processes see it. A pid is enough: DNAFix runs on one host. */
+  readonly ownerId: string;
+  private readonly leaseTtlMs: number;
 
-  constructor(private readonly deps: PipelineDeps) {}
+  /** `ownerId` and `leaseTtlMs` are overridable so a test can be two processes at once. */
+  constructor(private readonly deps: PipelineDeps, ownerId = `pid-${process.pid}`, leaseTtlMs = Number(process.env.DNAFIX_RUN_LEASE_TTL_MS ?? DEFAULT_LEASE_TTL_MS)) {
+    this.ownerId = ownerId;
+    this.leaseTtlMs = leaseTtlMs;
+  }
 
   /**
    * Read a run for writing. The returned copy is tracked, so a later save that
@@ -175,6 +188,27 @@ export class RunService {
   }
 
   /**
+   * Take the right to drive this run. Another process holding a live lease is
+   * already working it, so this gives up without touching anything; a lease whose
+   * holder died is taken over, which is how a run resumes after a crash instead of
+   * sitting in an intermediate state forever. Null means "not yours — do not drive".
+   */
+  async claim(runId: string): Promise<RunRecord | null> {
+    const run = await this.load(runId);
+    if (!run || !isDrivable(run.state)) return null;
+    if (run.lease && run.lease.owner !== this.ownerId && Date.parse(run.lease.expiresAt) > Date.now()) return null;
+    run.lease = { owner: this.ownerId, expiresAt: new Date(Date.now() + this.leaseTtlMs).toISOString() };
+    try {
+      await this.write(run);
+    } catch (err) {
+      // The row moved while we were deciding, so another writer is the driver now.
+      if (err instanceof RunConflictError) return null;
+      throw err;
+    }
+    return run;
+  }
+
+  /**
    * Re-read the row, move only this writer's own fields onto it and retry, up to
    * STALE_WRITE_ATTEMPTS times. Merging is safe only when the other writer left
    * those fields alone; a field both changed is reported, never guessed. The
@@ -182,6 +216,11 @@ export class RunService {
    * GitHub calls all happen before it.
    */
   private async write(run: RunRecord): Promise<void> {
+    // Every write is proof of life. The driver extends its own lease here, so a long
+    // phase between state changes does not make a healthy run look abandoned.
+    if (run.lease?.owner === this.ownerId) {
+      run.lease = { owner: this.ownerId, expiresAt: new Date(Date.now() + this.leaseTtlMs).toISOString() };
+    }
     for (let attempt = 1; ; attempt++) {
       try {
         await this.deps.store.saveRun(run);
@@ -386,12 +425,19 @@ export class Pipeline {
     this.runs = new RunService(deps);
   }
 
-  /** Execute until a pause state, terminal state, or blocker. Safe to call repeatedly; per-process lock prevents duplicate execution. */
-  async process(runId: string): Promise<void> {
-    if (running.has(runId)) return;
+  /**
+   * Drive the run until it pauses, finishes or blocks. The in-process set stops this
+   * process re-entering its own work; the stored lease stops a second process — the
+   * API approving while the worker polls, or a poll after a restart — from doing the
+   * same outward effects twice. Resolves false when the run was left to its owner.
+   */
+  async process(runId: string): Promise<boolean> {
+    if (running.has(runId)) return false;
     running.add(runId);
     try {
+      if (!(await this.runs.claim(runId))) return false;
       await this.execute(runId);
+      return true;
     } finally {
       running.delete(runId);
     }
@@ -911,4 +957,4 @@ export function buildPrBody(run: RunRecord): string {
     .join("\n\n");
 }
 
-export { canRunInParallel };
+export { canRunInParallel, isDrivable };

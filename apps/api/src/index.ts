@@ -286,6 +286,18 @@ app.post("/api/v1/runs/:id/cancel", async (req, reply) => {
   return cancelled;
 });
 
+app.post("/api/v1/runs/:id/resume", async (req, reply) => {
+  const run = await loadRun((req.params as { id: string }).id, reply);
+  if (!run) return;
+  if (run.state !== "BLOCKED") return reply.code(409).send({ error: `Run is ${run.state}; only a BLOCKED run can be resumed` });
+  const blocker = run.error;
+  run.error = null;
+  const queued = await runs.transition(run, "QUEUED");
+  await runs.audit(run.id, run.repositoryId, "user", "run.resumed", "ok", blocker ? `previous blocker: ${blocker.slice(0, 300)}` : null);
+  kick(run.id);
+  return queued;
+});
+
 app.get("/api/v1/runs/:id/diff", async (req, reply) => {
   const run = await loadRun((req.params as { id: string }).id, reply);
   if (!run) return;

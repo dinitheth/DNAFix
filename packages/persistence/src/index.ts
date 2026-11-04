@@ -113,6 +113,16 @@ export interface EffectRecord {
   completedAt: string | null;
 }
 
+/**
+ * Which process is driving a run right now. A single host runs the API and the
+ * worker as separate processes against the same database, so "who owns this run"
+ * has to be written down; an expired lease means its holder died mid-phase.
+ */
+export interface RunLease {
+  owner: string;
+  expiresAt: string;
+}
+
 export interface RunRecord {
   id: string;
   repositoryId: string;
@@ -152,6 +162,8 @@ export interface RunRecord {
    * Absent on runs recorded before the journal existed.
    */
   effects?: EffectRecord[];
+  /** The process driving this run, while its lease is live. */
+  lease?: RunLease | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -219,31 +231,38 @@ const emptyDb = (): DbShape => ({
   mcpInvocations: [],
 });
 
+/**
+ * In-memory store for tests and single-process runs.
+ * Records are copied in and out: handing a caller the stored object would let an
+ * in-place mutation rewrite persisted state without ever reaching saveRun.
+ */
 export class MemoryStore implements Store {
   private db: DbShape = emptyDb();
   async saveRepository(repo: RepositoryRecord): Promise<void> {
-    this.db.repositories = [...this.db.repositories.filter((r) => r.id !== repo.id), repo];
+    this.db.repositories = [...this.db.repositories.filter((r) => r.id !== repo.id), structuredClone(repo)];
   }
   async getRepository(id: string): Promise<RepositoryRecord | null> {
-    return this.db.repositories.find((r) => r.id === id) ?? null;
+    const repo = this.db.repositories.find((r) => r.id === id);
+    return repo ? structuredClone(repo) : null;
   }
   async listRepositories(): Promise<RepositoryRecord[]> {
-    return [...this.db.repositories];
+    return structuredClone(this.db.repositories);
   }
   async saveRun(run: RunRecord): Promise<void> {
-    this.db.runs = [...this.db.runs.filter((r) => r.id !== run.id), run];
+    this.db.runs = [...this.db.runs.filter((r) => r.id !== run.id), structuredClone(run)];
   }
   async getRun(id: string): Promise<RunRecord | null> {
-    return this.db.runs.find((r) => r.id === id) ?? null;
+    const run = this.db.runs.find((r) => r.id === id);
+    return run ? structuredClone(run) : null;
   }
   async listRuns(): Promise<RunRecord[]> {
-    return [...this.db.runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return structuredClone([...this.db.runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   }
   async appendAudit(event: AuditEvent): Promise<void> {
-    this.db.audit.push(event);
+    this.db.audit.push(structuredClone(event));
   }
   async listAudit(runId?: string): Promise<AuditEvent[]> {
-    return this.db.audit.filter((e) => !runId || e.runId === runId);
+    return structuredClone(this.db.audit.filter((e) => !runId || e.runId === runId));
   }
   async saveGitHubConnection(connection: GitHubConnectionRecord): Promise<void> {
     this.db.githubConnections = [...this.db.githubConnections.filter((c) => c.sessionId !== connection.sessionId), structuredClone(connection)];
@@ -390,14 +409,15 @@ export class FileStore implements Store {
 
   async saveRepository(repo: RepositoryRecord): Promise<void> {
     await this.mutate((db) => {
-      db.repositories = [...db.repositories.filter((r) => r.id !== repo.id), repo];
+      db.repositories = [...db.repositories.filter((r) => r.id !== repo.id), structuredClone(repo)];
     });
   }
   async getRepository(id: string): Promise<RepositoryRecord | null> {
-    return (await this.load()).repositories.find((r) => r.id === id) ?? null;
+    const repo = (await this.load()).repositories.find((r) => r.id === id);
+    return repo ? structuredClone(repo) : null;
   }
   async listRepositories(): Promise<RepositoryRecord[]> {
-    return [...(await this.load()).repositories];
+    return structuredClone((await this.load()).repositories);
   }
   async saveRun(run: RunRecord): Promise<void> {
     await this.mutate((db) => {
@@ -409,15 +429,15 @@ export class FileStore implements Store {
     return run ? structuredClone(run) : null;
   }
   async listRuns(): Promise<RunRecord[]> {
-    return [...(await this.load()).runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return structuredClone([...(await this.load()).runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   }
   async appendAudit(event: AuditEvent): Promise<void> {
     await this.mutate((db) => {
-      db.audit.push(event);
+      db.audit.push(structuredClone(event));
     });
   }
   async listAudit(runId?: string): Promise<AuditEvent[]> {
-    return (await this.load()).audit.filter((e) => !runId || e.runId === runId);
+    return structuredClone((await this.load()).audit.filter((e) => !runId || e.runId === runId));
   }
   async saveGitHubConnection(connection: GitHubConnectionRecord): Promise<void> {
     await this.mutate((db) => {

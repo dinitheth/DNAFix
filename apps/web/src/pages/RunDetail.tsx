@@ -218,11 +218,18 @@ export function RunDetail() {
             <h1 className="min-w-0 text-[20px] font-semibold leading-[26px] tracking-[-0.02em] text-[#ECEEF0]">{r.issueTitle}</h1>
             <StatusPill tone={stateTone(r.state)}>{stateLabel(r.state)}</StatusPill>
           </div>
-          {!terminal && (
-            <Button variant="danger-ghost" loading={acting === "cancel"} onClick={() => act("cancel", "/cancel")}>
-              Cancel run
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {r.state === "BLOCKED" && (
+              <Button variant="secondary" loading={acting === "resume"} onClick={() => act("resume", "/resume")}>
+                Resume
+              </Button>
+            )}
+            {!terminal && (
+              <Button variant="danger-ghost" loading={acting === "cancel"} onClick={() => act("cancel", "/cancel")}>
+                Cancel run
+              </Button>
+            )}
+          </div>
         </div>
         <p className="mt-0.5 truncate font-mono text-[11px] leading-[18px] text-[#5E626E]">
           {r.id} · model {r.modelProvider} · base {r.baseCommitSha ? r.baseCommitSha.slice(0, 12) : "pending"} · snapshot{" "}

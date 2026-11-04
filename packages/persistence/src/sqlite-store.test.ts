@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
-import { FileStore, MemoryStore, SqliteStore, SqliteStoreError, isTerminalRunWrite, type Store } from "./index.js";
+import { FileStore, MemoryStore, SqliteStore, SqliteStoreError, isTerminalRunWrite, type EffectRecord, type Store } from "./index.js";
 import { approval, auditEvent, ghConnection, invocation, mcpConnection, mcpRunGrant, mcpServerPermission, mcpToolPermission, repository, runFixture } from "./test-fixtures.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -108,6 +108,27 @@ async function contractSuite(label: string, make: () => Promise<Store>) {
       await store.saveRun(runFixture({ id: "run_old", createdAt: "2025-01-01T00:00:00.000Z" }));
       await store.saveRun(runFixture({ id: "run_new", createdAt: "2026-11-04T00:00:00.000Z" }));
       expect((await store.listRuns()).map((r) => r.id)).toEqual(["run_new", "run_old"]);
+    });
+
+    it("hands out copies, so mutating a record cannot rewrite stored state", async () => {
+      const store = await make();
+      await store.saveRepository(repository);
+      const effect: EffectRecord = { key: "github.draft-pr", kind: "github.pull-request", status: "started", detail: null, startedAt: "2026-11-04T10:00:00.000Z", completedAt: null };
+      await store.saveRun(runFixture({ effects: [effect] }));
+
+      // Writing through the caller's own object is not a write.
+      effect.status = "completed";
+      expect((await store.getRun("run_1"))?.effects?.[0]?.status).toBe("started");
+
+      const loaded = (await store.getRun("run_1"))!;
+      loaded.state = "COMPLETED";
+      loaded.effects!.push(effect);
+      (await store.listRuns())[0]!.error = "nobody asked for this";
+
+      const after = (await store.getRun("run_1"))!;
+      expect(after.state).toBe("QUEUED");
+      expect(after.effects).toHaveLength(1);
+      expect(after.error).toBeNull();
     });
   });
 }

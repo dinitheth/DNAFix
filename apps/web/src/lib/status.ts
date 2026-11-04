@@ -125,7 +125,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
             label: "Workflow Persistence",
             tone: "ready",
             state: "Durable",
-            explanation: "Every transition commits to shared SQLite. Resume after a crash is not built yet.",
+            explanation: "Every transition commits to shared SQLite; one process leases a run at a time and a restart picks up where it stopped.",
           },
   );
   return items;

@@ -45,3 +45,12 @@ export function isTerminal(state: WorkflowState): boolean {
 export function isPaused(state: WorkflowState): boolean {
   return state === "AWAITING_PLAN_APPROVAL" || state === "AWAITING_PR_APPROVAL" || state === "NEEDS_CLARIFICATION" || state === "BLOCKED";
 }
+
+/**
+ * Whether a driver may pick this state up on its own. Anything that is neither
+ * finished nor waiting on a human is work in progress — including the states a
+ * crashed process leaves behind, which is how a restart resumes instead of stalling.
+ */
+export function isDrivable(state: WorkflowState): boolean {
+  return !isTerminal(state) && !isPaused(state);
+}
