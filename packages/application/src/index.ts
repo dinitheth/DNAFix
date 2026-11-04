@@ -3,13 +3,13 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AuditEvent, CreateRunRequest } from "@dnafix/contracts";
+import type { AuditEvent, CreateRunRequest, ImplementationPlan } from "@dnafix/contracts";
 import { assertTransition, canRunInParallel, findOverlappingChanges, integrationOrder, isDrivable, validatePlanSemantics } from "@dnafix/domain";
 import { createCommandRunner, type CommandRunner } from "@dnafix/execution";
 import { GitWorktreeManager, cloneRepository, cloneRepositoryWithToken } from "@dnafix/git-engine";
 import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
 import { McpConnectorService } from "@dnafix/mcp";
-import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
+import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider, type PlanInput } from "@dnafix/model-provider";
 import { FileStore, SqliteStore, importLegacyJson, isStaleWrite, isTerminalRunWrite, type EffectRecord, type LegacyImportReport, type RunRecord, type Store } from "@dnafix/persistence";
 import { ProjectDNAAdapter, RepositoryIntelligenceError, type RepositoryIntelligence } from "@dnafix/repository-intelligence";
 import { compareImpact, discoverChecks, evaluateVerification, runChecks } from "@dnafix/verification";
@@ -146,6 +146,25 @@ function sameJson(a: unknown, b: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * What the planner was asked, as a short stable digest — and so what a journal entry
+ * is keyed by. Deliberately excludes the intelligence report's own timestamps: a
+ * re-driven phase re-analyzes the repository, and a fresh `analyzedAt` is not a
+ * different question.
+ */
+export function planInputHash(input: PlanInput): string {
+  const question = JSON.stringify([
+    input.issueTitle,
+    input.issueBody,
+    input.clarificationAnswer ?? null,
+    input.baseCommitSha,
+    input.repositorySnapshotId,
+    input.intelligence.files,
+    input.fileExcerpts.map((excerpt) => [excerpt.path, excerpt.content]),
+  ]);
+  return createHash("sha256").update(question).digest("hex").slice(0, 16);
 }
 
 /** Another writer holds a different view of this run, so this write was dropped. */
@@ -589,7 +608,7 @@ export class Pipeline {
         const files = run.intelligence?.files ?? [];
         const excerptPaths = files.filter((f) => /\.(ts|tsx|js|jsx|py)$/.test(f)).slice(0, 12);
         const excerpts = await readScopedFiles(integration.path, excerptPaths);
-        const output = await model.analyzeAndPlan({
+        const input: PlanInput = {
           issueTitle: run.issueTitle,
           issueBody: run.issueBody,
           clarificationAnswer: run.clarificationAnswer,
@@ -597,25 +616,46 @@ export class Pipeline {
           repositorySnapshotId: run.repositorySnapshotId!,
           intelligence: run.intelligence!,
           fileExcerpts: excerpts,
-        });
-        if (output.plan.baseCommitSha.toLowerCase() !== run.baseCommitSha!.toLowerCase()) {
-          throw new Error(`Plan baseCommitSha ${output.plan.baseCommitSha} does not match run base ${run.baseCommitSha}`);
+        };
+        const effectKey = `model.analyze-and-plan:${planInputHash(input)}`;
+        const intent = await this.runs.startEffect(run, effectKey, "model.analyze-and-plan");
+        let plan: ImplementationPlan;
+        let targets: string[];
+        if (intent.status === "completed") {
+          if (!run.plan || !run.analysis) {
+            throw new Error(`Run ${run.id} journaled a paid-for plan at ${effectKey} but the row holds none.`);
+          }
+          plan = run.plan;
+          targets = run.nominatedTargets ?? [];
+          await this.runs.audit(run.id, run.repositoryId, "lead-planner", "model.plan.reused", "ok", intent.detail ?? effectKey);
+        } else {
+          const output = await model.analyzeAndPlan(input);
+          if (output.plan.baseCommitSha.toLowerCase() !== run.baseCommitSha!.toLowerCase()) {
+            throw new Error(`Plan baseCommitSha ${output.plan.baseCommitSha} does not match run base ${run.baseCommitSha}`);
+          }
+          validatePlanSemantics(output.plan);
+          plan = output.plan;
+          run.analysis = output.analysis;
+          run.plan = output.plan;
+          // Resolve model-nominated targets against the real tree.
+          const known = new Set(run.intelligence!.files);
+          targets = output.nominatedTargets.filter((t) => known.has(t)).slice(0, 20);
+          run.nominatedTargets = targets;
+          // One write holds the answer and the proof it was paid for, so a crash after
+          // it resumes from the plan instead of buying the same plan twice.
+          await this.runs.finishEffect(run, effectKey, `tasks=${plan.tasks.length}`);
         }
-        validatePlanSemantics(output.plan);
-        run.analysis = output.analysis;
-        run.plan = output.plan;
-        // Resolve model-nominated targets against the real tree, then query Project DNA impact for them.
-        const known = new Set(run.intelligence!.files);
-        const targets = output.nominatedTargets.filter((t) => known.has(t)).slice(0, 20);
-        run.nominatedTargets = targets;
         if (targets.length > 0) {
           run.intelligence = await intelligence.analyze({ rootPath: integration.path, baseCommitSha: run.baseCommitSha!, targetPaths: targets });
           run.impactSnapshotId = `${run.intelligence.repositoryId}@v${run.intelligence.analysisVersion ?? "unknown"}`;
           await this.runs.audit(run.id, run.repositoryId, "lead-planner", "project-dna.impact", "ok", `targets=${targets.join(",")} snapshot=${run.impactSnapshotId}`);
         }
-        run.tasks = output.plan.tasks.map((t) => ({
+        // A re-driven phase keeps the work already done: task records survive, and only
+        // tasks the plan does not know about start over as pending.
+        const previous = new Map(run.tasks.map((t) => [t.taskId, t]));
+        run.tasks = plan.tasks.map((t) => previous.get(t.id) ?? {
           taskId: t.id,
-          status: "pending",
+          status: "pending" as const,
           worktreePath: null,
           branch: null,
           changedPaths: [],
@@ -623,7 +663,7 @@ export class Pipeline {
           patchSummary: null,
           attempts: 0,
           error: null,
-        }));
+        });
         await this.runs.save(run);
         run = await this.runs.transition(run, "ISSUE_PLANNING");
       }

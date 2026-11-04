@@ -6,12 +6,13 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { PipelineDeps } from "@dnafix/application";
+import { planInputHash } from "@dnafix/application";
 import { HostCommandRunner } from "@dnafix/execution";
 import { GitWorktreeManager } from "@dnafix/git-engine";
 import { GitHubAdapter } from "@dnafix/github";
 import { MemoryStore, SqliteStore, type RunRecord, type Store } from "@dnafix/persistence";
 import type { RepositoryIntelligence } from "@dnafix/repository-intelligence";
-import type { ModelProvider } from "@dnafix/model-provider";
+import type { ModelProvider, PlanInput } from "@dnafix/model-provider";
 
 const exec = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,80 @@ const unreachableModel = {
     throw new Error("PULL_REQUEST_CREATION must not re-pay the planner");
   },
 } as unknown as ModelProvider;
+
+/** A repository report that does not change between calls, so a re-drive is comparable. */
+export function stableIntelligence(): RepositoryIntelligence {
+  return {
+    providerName: "stable-test-double",
+    analyze: async (input: { baseCommitSha: string; targetPaths: string[] }) => ({
+      repositoryId: "fixture-repo",
+      baseCommitSha: input.baseCommitSha,
+      analysisVersion: 1,
+      analyzedAt: "2026-11-04T09:00:00.000Z",
+      architecture: { layers: ["domain"], patterns: ["modular"], summary: "test-double architecture summary" },
+      criticalComponents: [{ name: "discount", path: "src/discount.ts", reason: "imported by cart" }],
+      risks: [],
+      languages: ["TypeScript"],
+      files: ["package.json", "src/cart.ts", "src/discount.ts", "test/cart.test.mjs"],
+      targets: input.targetPaths.map((targetPath) => ({
+        targetPath,
+        directImpacted: ["src/cart.ts"],
+        transitiveImpacted: [],
+        evidenceReasons: ["direct-dependent"],
+        truncations: [],
+      })),
+      workingTree: null,
+      complete: true,
+      warnings: [],
+    }),
+  } as unknown as RepositoryIntelligence;
+}
+
+/** A planner that charges every call, so a test can see whether a resume paid twice. */
+export function countingPlanner(taskIds: string[] = ["fix-discount"]) {
+  const calls: Array<{ hash: string; clarification: string | null }> = [];
+  const model = {
+    name: "counting-test-double",
+    modelId: "counting-test-double",
+    analyzeAndPlan: async (input: PlanInput) => {
+      calls.push({ hash: planInputHash(input), clarification: input.clarificationAnswer ?? null });
+      return {
+        analysis: {
+          summary: "Percentage discount is subtracted as a flat amount.",
+          problemDescription: "applyDiscount subtracts percentOff as currency.",
+          expectedBehavior: "applyDiscount(200, 10) === 180.",
+          requirements: ["Fix percentage calculation in src/discount.ts"],
+          acceptanceCriteria: ["applyDiscount(200, 10) === 180"],
+          ambiguities: [],
+          assumptions: [],
+          riskLevel: "low" as const,
+        },
+        plan: {
+          baseCommitSha: input.baseCommitSha,
+          repositorySnapshotId: input.repositorySnapshotId,
+          steps: [{ id: "s1", description: "Fix applyDiscount" }],
+          tasks: taskIds.map((id) => ({
+            id,
+            title: `Fix ${id}`,
+            description: "Correct applyDiscount in src/discount.ts",
+            expectedOutcome: "Percentage discounts are proportional.",
+            fileScope: ["src/discount.ts"],
+            dependsOn: [],
+            acceptanceCriteria: ["applyDiscount(200, 10) === 180"],
+            testExpectations: ["npm test passes"],
+            retryLimit: 1,
+          })),
+          validationPlan: [{ id: "v1", kind: "test" as const, description: "Run test suite" }],
+          predictedAffectedPaths: [{ path: "src/discount.ts", source: "project-dna" as const, reason: "contains buggy function", evidence: "fake-intelligence" }],
+          unresolvedQuestions: [],
+          requiresHumanClarification: false,
+        },
+        nominatedTargets: ["src/discount.ts"],
+      };
+    },
+  } as unknown as ModelProvider;
+  return { model, calls };
+}
 
 export interface FakePr {
   number: number;
@@ -160,7 +235,10 @@ export interface Process {
  * One process' view of the system. Passing the same `sqlite` file twice is how a
  * restart is modelled: the second call sees only what the first wrote to disk.
  */
-export async function startProcess(ws: Workspace, options: { prs?: FakePr[]; sqlite?: string; seedRepository?: boolean } = {}): Promise<Process> {
+export async function startProcess(
+  ws: Workspace,
+  options: { prs?: FakePr[]; sqlite?: string; seedRepository?: boolean; model?: ModelProvider; intelligence?: RepositoryIntelligence } = {},
+): Promise<Process> {
   const prs = options.prs ?? [];
   const { fetchFn, created } = fakeGitHub(prs);
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -180,8 +258,8 @@ export async function startProcess(ws: Workspace, options: { prs?: FakePr[]; sql
   }
   const deps: PipelineDeps = {
     store,
-    intelligence: unreachableIntelligence,
-    model: unreachableModel,
+    intelligence: options.intelligence ?? unreachableIntelligence,
+    model: options.model ?? unreachableModel,
     remoteExecution: null,
     worktrees,
     runner: new HostCommandRunner(),
