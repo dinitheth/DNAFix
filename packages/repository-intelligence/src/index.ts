@@ -35,6 +35,8 @@ export interface RepositoryIntelligence {
   readonly providerName: string;
   /** Where the real Project DNA checkout resolved to, for readiness reporting. Absent for test doubles. */
   readonly location?: string | null;
+  /** Node binary the bridge is spawned with, so readiness can report a pinned runtime. */
+  readonly runtime?: string;
   analyze(input: { rootPath: string; baseCommitSha: string; targetPaths: string[]; changedPaths?: string[] }): Promise<RepositoryIntelligenceReport>;
 }
 
@@ -57,6 +59,7 @@ export function projectDnaRuntime(): string {
 export class ProjectDNAAdapter implements RepositoryIntelligence {
   readonly providerName = "project-dna";
   readonly location: string | null;
+  readonly runtime = projectDnaRuntime();
   constructor(
     private readonly projectDnaPath = resolveProjectDnaPath(),
     private readonly timeoutMs = Number(process.env.PROJECT_DNA_TIMEOUT_MS ?? 600_000),

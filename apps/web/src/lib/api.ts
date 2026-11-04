@@ -55,7 +55,7 @@ export interface RepositoryRecord {
 
 export interface ConfigStatus {
   model: { provider: string; modelId: string; subAgentModelId: string; configured: boolean; transport: string; baseUrl: string };
-  projectDna: { configured: boolean; path: string | null };
+  projectDna: { configured: boolean; path: string | null; runtime?: string | null };
   github: {
     configured: boolean;
     appConfigured?: boolean;
@@ -68,6 +68,17 @@ export interface ConfigStatus {
   workflowEngine: string;
   temporalAddress: string | null;
   store?: { kind: "sqlite" | "file"; location: string };
+  /** Resolved security posture. Presence and policy only — the API never reports secret values. */
+  security: {
+    bind: string;
+    remoteBind: boolean;
+    lanBindAllowed: boolean;
+    sessionTokenRequired: boolean;
+    repositoryRoots: string[];
+    webhookSecretConfigured: boolean;
+    tokenEncryptionKeyConfigured: boolean;
+    corsOrigin: string;
+  };
 }
 
 export interface VerificationCheckView {

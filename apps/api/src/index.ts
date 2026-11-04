@@ -119,6 +119,11 @@ function kick(runId: string): void {
 
 app.get("/health", async () => ({ status: "ok", service: "dnafix-api", time: new Date().toISOString() }));
 
+const port = Number(process.env.API_PORT ?? 3001);
+const bindHost = process.env.DNAFIX_BIND_HOST?.trim() || "127.0.0.1";
+const lanBind = isLanBindEnabled();
+const remoteBind = isRemoteBind(bindHost);
+
 /** Live readiness payload. Recomputed per request so runtime configuration changes are reflected immediately. */
 function configStatusPayload() {
   const projectDnaPath = deps.intelligence.location ?? null;
@@ -131,7 +136,7 @@ function configStatusPayload() {
       transport: process.env.MODEL_TRANSPORT ?? "responses",
       baseUrl: process.env.MODEL_API_BASE_URL ?? "https://api.meta.ai/v1",
     },
-    projectDna: { configured: Boolean(projectDnaPath), path: projectDnaPath },
+    projectDna: { configured: Boolean(projectDnaPath), path: projectDnaPath, runtime: deps.intelligence.runtime ?? null },
     github: {
       configured: deps.github.configured,
       appConfigured: deps.github.appConfigured,
@@ -150,6 +155,17 @@ function configStatusPayload() {
     workflowEngine: process.env.WORKFLOW_ENGINE === "temporal" ? "temporal" : "in-process-durable",
     temporalAddress: process.env.TEMPORAL_ADDRESS?.trim() || null,
     store: describeStore(deps.store),
+    // Presence and policy only. Secret values never leave this process.
+    security: {
+      bind: `${bindHost}:${port}`,
+      remoteBind,
+      lanBindAllowed: lanBind,
+      sessionTokenRequired: Boolean(sessionToken),
+      repositoryRoots: configuredRepositoryRoots(),
+      webhookSecretConfigured: Boolean(process.env.GITHUB_WEBHOOK_SECRET),
+      tokenEncryptionKeyConfigured: Boolean(githubIntegration.config.encryptionKey),
+      corsOrigin: process.env.WEB_ORIGIN ?? "http://localhost:5173",
+    },
   };
 }
 
@@ -401,19 +417,15 @@ app.post("/api/v1/webhooks/github", async (req, reply) => {
   return { received: true };
 });
 
-const port = Number(process.env.API_PORT ?? 3001);
-const bindHost = process.env.DNAFIX_BIND_HOST?.trim() || "127.0.0.1";
-const lanBind = isLanBindEnabled();
-const remote = isRemoteBind(bindHost);
-if (remote && !lanBind) {
+if (remoteBind && !lanBind) {
   throw new Error(
     `Refusing to bind ${bindHost}: a non-loopback host exposes run creation, which executes repository code. Set DNAFIX_ALLOW_LAN_BIND=true to opt in.`,
   );
 }
-if (remote && !sessionToken) {
+if (remoteBind && !sessionToken) {
   throw new Error(`Refusing to bind ${bindHost} without DNAFIX_SESSION_TOKEN: an exposed API must not be unauthenticated.`);
 }
-if (remote && configuredRepositoryRoots().length === 0) {
+if (remoteBind && configuredRepositoryRoots().length === 0) {
   throw new Error(`Refusing to bind ${bindHost} without DNAFIX_ALLOWED_REPOSITORY_ROOTS: an exposed API must constrain which repositories it may open.`);
 }
 await app.listen({ port, host: bindHost });

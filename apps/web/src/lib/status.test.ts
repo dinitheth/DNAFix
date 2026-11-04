@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuditEvent, ConfigStatus } from "./api";
-import { blockingReasons, briefMessage, decisionsWaiting, formatAgo, formatClock, formatDuration, formatSpan, formatStarted, lastStartedStage, readinessHref, readinessItems, repositoryLabel, runAttempts, runStages, stageOfAction, stageTimings, verificationCandidates } from "./status";
+import { blockingReasons, briefMessage, configurationSummary, decisionsWaiting, formatAgo, formatClock, formatDuration, formatSpan, formatStarted, lastStartedStage, readinessHref, readinessItems, repositoryLabel, runAttempts, runStages, stageOfAction, stageTimings, verificationCandidates } from "./status";
 
 const config = (over: Partial<ConfigStatus> = {}): ConfigStatus => ({
   model: { provider: "meta-muse-wonder", modelId: "muse-wonder-1.0", subAgentModelId: "muse-spark-1.3", configured: true, transport: "responses", baseUrl: "https://api.meta.ai/v1" },
@@ -10,6 +10,7 @@ const config = (over: Partial<ConfigStatus> = {}): ConfigStatus => ({
   execution: { provider: "local", remoteConfigured: false, project: null, bucket: null, region: "ap-southeast-2" },
   workflowEngine: "in-process-durable",
   temporalAddress: null,
+  security: { bind: "127.0.0.1:3001", remoteBind: false, lanBindAllowed: false, sessionTokenRequired: false, repositoryRoots: [], webhookSecretConfigured: false, tokenEncryptionKeyConfigured: true, corsOrigin: "http://localhost:5173" },
   ...over,
 });
 
@@ -250,5 +251,46 @@ describe("decision queues", () => {
     expect(readinessHref("dna")).toBe("/settings#dna");
     expect(readinessHref("github")).toBe("/connectors/github");
     expect(readinessHref("unknown")).toBe("/settings");
+  });
+});
+
+describe("configuration summary", () => {
+  const github = {
+    configured: true,
+    connected: true,
+    account: { id: 1, login: "dinitheth", name: null, avatarUrl: null, htmlUrl: "https://github.com/dinitheth" },
+    installation: { id: 42, accountLogin: "dinitheth", accountType: "User" },
+  };
+  const mcp = { state: "connected" as const, serverCount: 3, toolCount: 40, enabledToolCount: 12 };
+
+  it("reports the resolved values an operator would be asked for", () => {
+    const text = configurationSummary(config(), github, mcp, new Date("2026-11-05T00:00:00.000Z"));
+    expect(text).toContain("DNAFix configuration 2026-11-05T00:00:00.000Z");
+    expect(text).toContain("lead=muse-wonder-1.0 sub=muse-spark-1.3");
+    expect(text).toContain("project-dna: vendor/Project-DNA");
+    expect(text).toContain("bind=127.0.0.1:3001 auth=loopback-only");
+    expect(text).toContain("account=dinitheth installation=42");
+    expect(text).toContain("state=connected servers=3 tools=40 enabled=12");
+  });
+
+  it("reports secret presence only, never a secret value", () => {
+    const text = configurationSummary(config(), null, null);
+    expect(text).toContain("key=present");
+    expect(text).toContain("token-encryption=present");
+    expect(text).toContain("webhook-secret=missing");
+    expect(text).toContain("connection=none");
+    expect(text).toContain("status unavailable");
+    expect(text).not.toMatch(/Bearer|PRIVATE KEY|BEGIN /);
+  });
+
+  it("carries cloud execution detail only when the provider is codebuild", () => {
+    const local = configurationSummary(config(), null, null);
+    expect(local).not.toContain("region=");
+    const cloud = configurationSummary(
+      config({ execution: { provider: "codebuild", remoteConfigured: true, project: "dnafix-build", bucket: "dnafix-artifacts", region: "ap-southeast-2" } }),
+      null,
+      null,
+    );
+    expect(cloud).toContain("project=dnafix-build bucket=dnafix-artifacts region=ap-southeast-2");
   });
 });

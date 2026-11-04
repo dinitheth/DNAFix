@@ -383,7 +383,7 @@ Base path `/api/v1`. OpenAPI UI is served at `/docs`. When `DNAFIX_SESSION_TOKEN
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness |
-| GET | `/api/v1/config/status` | Integration status (model, Project DNA, GitHub, sandbox, workflow engine) — honest configured/untested flags |
+| GET | `/api/v1/config/status` | Resolved configuration: model, Project DNA (path + bridge runtime), GitHub, sandbox, workflow engine, store and security posture (bind, auth, repository roots, secret presence — never secret values) |
 | GET | `/api/v1/repositories` | Connected repositories |
 | POST | `/api/v1/runs` | Create a run (local path or GitHub owner/repo + issue) |
 | GET | `/api/v1/runs` · `/api/v1/runs/:id` | List / fetch runs (repository-boundary checked) |

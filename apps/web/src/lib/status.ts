@@ -1,4 +1,4 @@
-import type { AuditEvent, ConfigStatus, Run } from "./api";
+import type { AuditEvent, ConfigStatus, GitHubStatus, McpConnectorView, Run } from "./api";
 
 export type ReadinessTone = "ready" | "attention" | "blocked" | "optional";
 
@@ -148,6 +148,32 @@ export function blockingReasons(config: ConfigStatus): string[] {
   return readinessItems(config)
     .filter((i) => i.tone === "blocked")
     .map((i) => `${i.label}: ${i.explanation}${i.recovery ? ` ${i.recovery}` : ""}`);
+}
+
+/**
+ * Plain-text snapshot of the configuration the backend actually resolved, for
+ * pasting into a bug report. Secrets are reported as presence only, never values.
+ */
+export function configurationSummary(
+  config: ConfigStatus,
+  github: Pick<GitHubStatus, "connected" | "account" | "installation"> | null,
+  mcp: Pick<McpConnectorView, "state" | "serverCount" | "toolCount" | "enabledToolCount"> | null,
+  now = new Date(),
+): string {
+  const s = config.security;
+  const remote = config.execution.provider === "codebuild";
+  return [
+    `DNAFix configuration ${now.toISOString()}`,
+    `model: ${config.model.provider} lead=${config.model.modelId} sub=${config.model.subAgentModelId} transport=${config.model.transport} endpoint=${config.model.baseUrl} key=${config.model.configured ? "present" : "missing"}`,
+    `project-dna: ${config.projectDna.path ?? "not resolved"} runtime=${config.projectDna.runtime ?? "—"}`,
+    `execution: provider=${config.execution.provider} sandbox=${config.sandboxMode}${remote ? ` project=${config.execution.project ?? "—"} bucket=${config.execution.bucket ?? "—"} region=${config.execution.region}` : ""}`,
+    `workflow: engine=${config.workflowEngine}${config.temporalAddress ? ` address=${config.temporalAddress}` : ""} store=${config.store?.kind ?? "—"} ${config.store?.location ?? "—"}`,
+    `security: bind=${s.bind} auth=${s.sessionTokenRequired ? "bearer" : "loopback-only"} roots=${s.repositoryRoots.join(", ") || "unrestricted"} webhook-secret=${s.webhookSecretConfigured ? "present" : "missing"} token-encryption=${s.tokenEncryptionKeyConfigured ? "present" : "missing"} cors=${s.corsOrigin}`,
+    `github: app=${(config.github.appConfigured ?? config.github.configured) ? "configured" : "not configured"} ${github?.connected ? `account=${github.account?.login ?? "—"} installation=${github.installation?.id ?? "—"}` : "connection=none"}`,
+    `docker-mcp: ${mcp ? `state=${mcp.state} servers=${mcp.serverCount} tools=${mcp.toolCount} enabled=${mcp.enabledToolCount}` : "status unavailable"}`,
+  ]
+    .map((line) => line.replace(/\s+$/, ""))
+    .join("\n");
 }
 
 export type StageId = "scanning" | "dna" | "planning" | "coding" | "verification" | "review";
