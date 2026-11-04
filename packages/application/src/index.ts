@@ -455,6 +455,11 @@ export class Pipeline {
     running.add(runId);
     try {
       if (!(await this.runs.claim(runId))) return false;
+      // Owning the lease means the previous driver is gone, so whatever it left in the
+      // MCP layer — an approval with no listener, a call with no result — is closed
+      // before this one can repeat it. A store that cannot tell us what it left is
+      // not a store we should drive against.
+      await this.deps.mcp?.reconcileInterruptedRun(runId);
       await this.execute(runId);
       return true;
     } finally {

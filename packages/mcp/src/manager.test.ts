@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { McpApprovalRecord, McpInvocationRecord } from "@dnafix/contracts";
 import { MemoryStore } from "@dnafix/persistence";
 import {
   McpConnectorError,
@@ -84,6 +85,8 @@ interface Page {
 class FakeClient implements McpClientLike {
   readonly callToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }> = [];
   result: unknown = { content: [{ type: "text", text: "ok" }] };
+  /** Set by a test to hold a gateway call open, which is how an interrupted call is simulated. */
+  gate: (() => Promise<void>) | null = null;
   private pages: Page[];
 
   constructor(pages: Page[]) {
@@ -117,6 +120,7 @@ class FakeClient implements McpClientLike {
 
   async callTool(params: { name: string; arguments?: Record<string, unknown> }) {
     this.callToolCalls.push({ name: params.name, arguments: params.arguments });
+    if (this.gate) await this.gate();
     return this.result;
   }
 
@@ -809,5 +813,134 @@ describe("MCP execution, approvals, and audit", () => {
     expect(first).not.toBe(modelToolName("docker", "remove-image"));
     expect(modelToolName("server with spaces/tools", "do.thing")).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
     expect(modelToolName("x".repeat(100), "y".repeat(100)).length).toBeLessThanOrEqual(64);
+  });
+});
+
+describe("MCP crash recovery", () => {
+  const interruptedInvocation = (runId: string): McpInvocationRecord => ({
+    id: `inv_${runId}`,
+    correlationId: `cor_${runId}`,
+    runId,
+    connectionId: "docker-desktop-mcp",
+    serverName: "docker",
+    toolName: "remove_container",
+    agent: "coding-agent",
+    modelId: "muse-spark-1.3",
+    permissionLevel: 3,
+    approvalId: `apv_${runId}`,
+    approvalStatus: "approved",
+    executed: true,
+    startedAt: "2026-11-04T10:00:00.000Z",
+    completedAt: null,
+    durationMs: null,
+    success: false,
+    argumentsRedacted: { container: "web-1" },
+    resultSummary: null,
+    error: null,
+  });
+
+  const pendingApproval = (runId: string): McpApprovalRecord => ({
+    id: `apv_${runId}`,
+    runId,
+    connectionId: "docker-desktop-mcp",
+    serverName: "docker",
+    toolName: "create_container",
+    kind: "per-call",
+    permissionLevel: 3,
+    correlationId: `cor_${runId}`,
+    argumentsRedacted: { image: "alpine" },
+    argumentsHash: "hash",
+    summary: "coding-agent wants to create a container",
+    consequences: "Destructive",
+    status: "pending",
+    requestedAt: "2026-11-04T10:00:00.000Z",
+    expiresAt: "2026-11-04T10:10:00.000Z",
+    decidedAt: null,
+    decidedBy: null,
+  });
+
+  it("writes the invocation before the gateway answers, so an interrupted call leaves a trace", async () => {
+    const context = await setup();
+    await connect(context);
+    await enableTool(context, "list_containers");
+    const tool = await toolFor(context, "run-inflight", "list_containers");
+    const client = context.clients[0]!;
+    let release: () => void = () => {};
+    client.gate = () => new Promise<void>((resolve) => { release = resolve; });
+
+    const inFlight = context.mcp.executeToolCall({
+      runId: "run-inflight",
+      repositoryId: null,
+      agent: "coding-agent",
+      modelId: "muse-spark-1.3",
+      tool,
+      arguments: { all: true },
+    });
+    let midCall = (await context.store.listMcpInvocations({ runId: "run-inflight" }))[0];
+    for (let wait = 0; wait < 100 && !midCall; wait++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      midCall = (await context.store.listMcpInvocations({ runId: "run-inflight" }))[0];
+    }
+    // The row is on disk while the gateway is still working: this is what a crash leaves.
+    expect(midCall).toMatchObject({ executed: true, completedAt: null, toolName: "list_containers" });
+
+    release();
+    await inFlight;
+
+    const after = await context.store.listMcpInvocations({ runId: "run-inflight" });
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ executed: true, success: true });
+    expect(after[0]?.completedAt).not.toBeNull();
+  });
+
+  it("reports an interrupted call as unresolved and drops its orphaned approval", async () => {
+    const context = await setup();
+    await context.store.saveMcpInvocation(interruptedInvocation("run-recon"));
+    await context.store.saveMcpApproval(pendingApproval("run-recon"));
+
+    const result = await context.mcp.reconcileInterruptedRun("run-recon");
+
+    expect(result).toEqual({ approvalsCancelled: 1, invocationsUnresolved: 1 });
+    const invocation = (await context.store.listMcpInvocations({ runId: "run-recon" }))[0]!;
+    expect(invocation.completedAt).not.toBeNull();
+    expect(invocation.success).toBe(false);
+    expect(invocation.error).toMatch(/may have taken effect/i);
+    expect((await context.store.getMcpApproval("apv_run-recon"))?.status).toBe("cancelled");
+    const actions = (await context.store.listAudit("run-recon")).map((event) => event.action);
+    expect(actions).toContain("mcp.reconciled");
+  });
+
+  it("leaves a finished call and a decided approval alone", async () => {
+    const context = await setup();
+    const finished = { ...interruptedInvocation("run-clean"), completedAt: "2026-11-04T10:00:01.000Z", success: true, resultSummary: "container removed" };
+    await context.store.saveMcpInvocation(finished);
+    await context.store.saveMcpApproval({ ...pendingApproval("run-clean"), status: "approved", decidedBy: "dinith", decidedAt: "2026-11-04T10:00:00.500Z" });
+
+    const result = await context.mcp.reconcileInterruptedRun("run-clean");
+
+    expect(result).toEqual({ approvalsCancelled: 0, invocationsUnresolved: 0 });
+    expect((await context.store.listMcpInvocations({ runId: "run-clean" }))[0]).toEqual(finished);
+    expect((await context.store.getMcpApproval("apv_run-clean"))?.status).toBe("approved");
+    expect((await context.store.listAudit("run-clean")).map((event) => event.action)).not.toContain("mcp.reconciled");
+  });
+
+  it("counts an interrupted call against the per-run budget", async () => {
+    const context = await setup({ maxToolCallsPerRun: 1 });
+    await connect(context);
+    await enableTool(context, "list_containers");
+    const tool = await toolFor(context, "run-budget", "list_containers");
+    await context.store.saveMcpInvocation({ ...interruptedInvocation("run-budget"), toolName: "list_containers" });
+
+    const blocked = await context.mcp.executeToolCall({
+      runId: "run-budget",
+      repositoryId: null,
+      agent: "coding-agent",
+      modelId: "muse-spark-1.3",
+      tool,
+      arguments: { all: true },
+    });
+
+    expect(blocked.summary).toMatch(/Maximum MCP tool calls/i);
+    expect(context.clients[0]!.callToolCalls).toHaveLength(0);
   });
 });

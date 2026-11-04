@@ -973,6 +973,44 @@ export class McpConnectorService implements AgentMcpRuntime {
     this.runControllers.delete(runId);
   }
 
+  /**
+   * Close out what a driver that died mid-call left behind, before a new driver
+   * touches the run: an approval nobody is waiting on any more, and an invocation
+   * that was sent to the gateway with no recorded result. The second is reported as
+   * unresolved rather than as not-run — DNAFix does not claim a side effect did not
+   * happen, and the next loop sees it in the run's history.
+   */
+  async reconcileInterruptedRun(runId: string): Promise<{ approvalsCancelled: number; invocationsUnresolved: number }> {
+    const pending = await this.store.listMcpApprovals({ runId, status: "pending" });
+    for (const approval of pending) {
+      approval.status = "cancelled";
+      approval.decidedAt = this.iso();
+      approval.decidedBy = "system";
+      await this.store.saveMcpApproval(approval);
+    }
+
+    const unresolved = (await this.store.listMcpInvocations({ runId })).filter((invocation) => invocation.executed && !invocation.completedAt);
+    for (const invocation of unresolved) {
+      invocation.completedAt = this.iso();
+      invocation.durationMs = new Date(invocation.completedAt).getTime() - new Date(invocation.startedAt).getTime();
+      invocation.success = false;
+      invocation.error = "The driver stopped before the gateway returned. This call may have taken effect; it was not repeated by reconciliation.";
+      await this.store.saveMcpInvocation(invocation);
+    }
+
+    if (pending.length > 0 || unresolved.length > 0) {
+      await this.audit(
+        runId,
+        null,
+        "system",
+        "mcp.reconciled",
+        "info",
+        `approvals cancelled=${pending.length} invocations unresolved=${unresolved.length}`,
+      );
+    }
+    return { approvalsCancelled: pending.length, invocationsUnresolved: unresolved.length };
+  }
+
   private async requestApproval(input: {
     runId: string;
     serverName: string;
@@ -1252,7 +1290,11 @@ export class McpConnectorService implements AgentMcpRuntime {
       });
       let result: unknown;
       try {
+        // Intent before effect: the gateway is about to be asked to change something
+        // real, so the row goes to disk first. A process that dies mid-call leaves
+        // "executed, no result" behind instead of silence.
         invocation.executed = true;
+        await this.saveInvocation(invocation);
         result = await Promise.race([
           session.client.callTool(
             { name: input.tool.toolName, arguments: input.arguments },
