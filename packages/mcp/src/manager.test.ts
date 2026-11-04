@@ -621,6 +621,87 @@ describe("MCP execution, approvals, and audit", () => {
     expect(context.clients[0]!.callToolCalls).toHaveLength(1);
   });
 
+  it("ignores a caller-claimed Level 1 on a destructive tool and still requires per-call approval", async () => {
+    const context = await setup();
+    await connect(context);
+    await enableTool(context, "remove_container");
+    const tool = await toolFor(context, "run-forged", "remove_container");
+    expect(tool.permissionLevel).toBe(3);
+
+    const pending = context.mcp.executeToolCall({
+      runId: "run-forged",
+      repositoryId: null,
+      agent: "coding-agent",
+      modelId: "muse",
+      tool: { ...tool, permissionLevel: 1 },
+      arguments: { container: "abc" },
+    });
+    const approval = await pendingApproval(context.store, "run-forged");
+    expect(approval).toMatchObject({ kind: "per-call", permissionLevel: 3 });
+    expect(context.clients[0]!.callToolCalls).toHaveLength(0);
+
+    await context.mcp.decideApproval("run-forged", approval.id, "deny");
+    expect((await pending).isError).toBe(true);
+    const invocation = (await context.store.listMcpInvocations({ runId: "run-forged" }))[0]!;
+    expect(invocation).toMatchObject({ permissionLevel: 3, executed: false, approvalStatus: "denied" });
+  });
+
+  it("keeps a policy-covered tool at its floor even when a stored permission record lowers it", async () => {
+    const context = await setup();
+    await connect(context);
+    await enableTool(context, "remove_container");
+    await expect(enableTool(context, "remove_container", { reviewedLevel: 1 })).rejects.toMatchObject({ code: "level_too_low" });
+    await expect(context.mcp.updatePermission({ serverName: "docker", toolName: "remove_container", enabled: true, reviewedLevel: 2 })).rejects.toMatchObject({
+      code: "level_too_low",
+    });
+    expect((await toolFor(context, "run-floor", "remove_container")).permissionLevel).toBe(3);
+  });
+
+  it("applies the trusted classification over a lower caller label for a tool outside the policy", async () => {
+    const context = await setup();
+    await connect(context);
+    await enableTool(context, "frobnicate_everything", { reviewedLevel: 2 });
+    const tool = await toolFor(context, "run-unlisted", "frobnicate_everything");
+    expect(tool.permissionLevel).toBe(2);
+
+    const pending = context.mcp.executeToolCall({
+      runId: "run-unlisted",
+      repositoryId: null,
+      agent: "coding-agent",
+      modelId: "muse",
+      tool: { ...tool, permissionLevel: 1 },
+      arguments: {},
+    });
+    const approval = await pendingApproval(context.store, "run-unlisted");
+    expect(approval).toMatchObject({ kind: "run-grant", permissionLevel: 2 });
+    expect(context.clients[0]!.callToolCalls).toHaveLength(0);
+    await context.mcp.decideApproval("run-unlisted", approval.id, "approve");
+    expect((await pending).isError).toBe(false);
+    expect((await context.store.listMcpInvocations({ runId: "run-unlisted" }))[0]).toMatchObject({ permissionLevel: 2 });
+  });
+
+  it("ignores an inflated caller label on a read-only tool instead of blocking it", async () => {
+    const context = await setup();
+    await connect(context);
+    await enableTool(context, "list_containers");
+    const tool = await toolFor(context, "run-inflated", "list_containers");
+    const result = await context.mcp.executeToolCall({
+      runId: "run-inflated",
+      repositoryId: null,
+      agent: "coding-agent",
+      modelId: "muse",
+      tool: { ...tool, permissionLevel: 3 },
+      arguments: { all: true },
+    });
+    expect(result.isError).toBe(false);
+    expect(await context.store.listMcpApprovals({ runId: "run-inflated" })).toHaveLength(0);
+    expect((await context.store.listMcpInvocations({ runId: "run-inflated" }))[0]).toMatchObject({
+      permissionLevel: 1,
+      approvalStatus: "not-required",
+      executed: true,
+    });
+  });
+
   it("expires an unanswered approval without executing the call", async () => {
     const context = await setup({ approvalTimeoutMs: 50 });
     await connect(context);

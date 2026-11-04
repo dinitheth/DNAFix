@@ -141,6 +141,7 @@ export class McpConnectorError extends Error {
       | "authentication_required"
       | "tool_disabled"
       | "tool_unreviewed"
+      | "level_too_low"
       | "invalid_arguments"
       | "approval_denied"
       | "run_limit"
@@ -888,6 +889,16 @@ export class McpConnectorService implements AgentMcpRuntime {
         "tool_unreviewed",
       );
     }
+    // A tool the policy already covers cannot be talked down by a later edit;
+    // a reviewer may make it stricter, never looser. For tools outside the
+    // policy the reviewer's level is the only level, so it replaces the
+    // conservative default instead of being floored by it.
+    if (reviewedLevel !== null && tool.reviewed && reviewedLevel < tool.permissionLevel) {
+      throw new McpConnectorError(
+        `Tool '${tool.name}' is classified ${permissionLabel(tool.permissionLevel)} by the reviewed policy. Choose that level or a stricter one.`,
+        "level_too_low",
+      );
+    }
     const allowedAgents = update.allowedAgents ?? current?.allowedAgents ?? BOTH_AGENTS;
     if (update.enabled && allowedAgents.length === 0) throw new McpConnectorError("Select at least one agent role for this tool.", "invalid_arguments");
     const serverPermission = maps.servers.get(update.serverName);
@@ -1101,7 +1112,9 @@ export class McpConnectorService implements AgentMcpRuntime {
       toolName: input.tool.toolName,
       agent: input.agent,
       modelId: input.modelId,
-      permissionLevel: input.tool.permissionLevel,
+      // Unknown until the trusted level is derived below; a call rejected
+      // before that point stays at the conservative default.
+      permissionLevel: 3,
       approvalId: null,
       approvalStatus: "not-required",
       executed: false,
@@ -1141,6 +1154,16 @@ export class McpConnectorService implements AgentMcpRuntime {
       return deny(err instanceof Error ? err.message : String(err), "not-required");
     }
 
+    // Authorization uses levels DNAFix derives server-side, never the level on
+    // the caller-supplied tool object: a model that mislabels a destructive
+    // tool as read-only must not be able to talk its past the approval gate.
+    // A policy-covered tool also keeps its floor even if a stored permission
+    // record says otherwise; for a tool outside the policy the reviewer's
+    // explicit level is the trusted level.
+    const fresh = classifyTool(discovered.serverName, discovered.name, discovered.annotations);
+    const trustedLevel = (fresh.reviewed ? Math.max(registered.permissionLevel, fresh.level) : registered.permissionLevel) as McpPermissionLevel;
+    invocation.permissionLevel = trustedLevel;
+
     const used = (await this.store.listMcpInvocations({ runId: input.runId })).filter((i) => i.executed).length;
     if (used >= this.maxToolCallsPerRun) {
       return deny(`Maximum MCP tool calls per run reached (${this.maxToolCallsPerRun}).`, "not-required");
@@ -1151,7 +1174,7 @@ export class McpConnectorService implements AgentMcpRuntime {
     let approvalStatus = "not-required";
     let approvalId: string | null = null;
     try {
-      if (input.tool.permissionLevel === 2) {
+      if (trustedLevel === 2) {
         const grants = await this.store.listMcpRunGrants(input.runId);
         const granted = grants.some(
           (g) =>
@@ -1185,7 +1208,7 @@ export class McpConnectorService implements AgentMcpRuntime {
             );
           }
         }
-      } else if (input.tool.permissionLevel === 3) {
+      } else if (trustedLevel === 3) {
         const approval = await this.requestApproval({
           runId: input.runId,
           serverName: input.tool.serverName,
@@ -1256,7 +1279,7 @@ export class McpConnectorService implements AgentMcpRuntime {
         input.agent,
         `mcp.${input.tool.serverName}.${input.tool.toolName}`,
         sanitized.isError ? "error" : "ok",
-        `correlation=${correlationId} level=${input.tool.permissionLevel} approval=${approvalId ?? "none"} durationMs=${invocation.durationMs} result=${sanitized.summary}`,
+        `correlation=${correlationId} level=${trustedLevel} approval=${approvalId ?? "none"} durationMs=${invocation.durationMs} result=${sanitized.summary}`,
       );
       return { text: sanitized.text, isError: sanitized.isError, summary: sanitized.summary };
     } catch (err) {
@@ -1274,7 +1297,7 @@ export class McpConnectorService implements AgentMcpRuntime {
         input.agent,
         `mcp.${input.tool.serverName}.${input.tool.toolName}`,
         "error",
-        `correlation=${correlationId} level=${input.tool.permissionLevel} approval=${approvalId ?? "none"} error=${message}`,
+        `correlation=${correlationId} level=${trustedLevel} approval=${approvalId ?? "none"} error=${message}`,
       );
       return { text: `MCP tool call failed: ${message}`, isError: true, summary: message };
     }

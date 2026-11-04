@@ -49,6 +49,7 @@ function statusForCode(code: McpConnectorError["code"]): number {
     case "profile_invalid":
     case "invalid_arguments":
     case "tool_unreviewed":
+    case "level_too_low":
       return 400;
     default:
       return 500;
