@@ -645,6 +645,12 @@ export class Pipeline {
         run.repositorySnapshotId = `${run.intelligence.repositoryId}@v${run.intelligence.analysisVersion ?? "unknown"}`;
         await this.runs.audit(run.id, run.repositoryId, "system", "project-dna.analysis", "ok", `snapshot=${run.repositorySnapshotId} complete=${run.intelligence.complete}`);
         await this.runs.save(run);
+        // The repository record carries which commit structural analysis last
+        // covered, so the repository view can tell a current snapshot from a stale one.
+        const repository = await this.deps.store.getRepository(run.repositoryId);
+        if (repository && repository.lastAnalyzedCommitSha !== run.baseCommitSha) {
+          await this.deps.store.saveRepository({ ...repository, lastAnalyzedCommitSha: run.baseCommitSha });
+        }
         run = await this.runs.transition(run, "IMPACT_ANALYSIS");
       }
       if (run.state === "IMPACT_ANALYSIS") {

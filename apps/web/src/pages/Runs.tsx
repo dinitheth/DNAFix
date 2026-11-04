@@ -33,12 +33,14 @@ function resultSummary(run: Run): string {
 export function Runs() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs"), refetchInterval: 5_000 });
   const repos = useQuery({ queryKey: ["repos"], queryFn: () => api<RepositoryRecord[]>("/repositories") });
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get("q") ?? "");
   const [filter, setFilter] = useState<(typeof STATUS_FILTERS)[number]>("All states");
+  const [repositoryId, setRepositoryId] = useState(() => new URLSearchParams(window.location.search).get("repo"));
 
   const visible = useMemo(() => {
     const q = query.toLowerCase();
     return (runs.data ?? []).filter((r) => {
+      if (repositoryId && r.repositoryId !== repositoryId) return false;
       if (!matchesFilter(r, filter)) return false;
       if (!q) return true;
       return (
@@ -47,7 +49,19 @@ export function Runs() {
         repositoryLabel(r, repos.data ?? [], r.repositoryId).toLowerCase().includes(q)
       );
     });
-  }, [runs.data, repos.data, filter, query]);
+  }, [runs.data, repos.data, filter, query, repositoryId]);
+
+  const scopedRepo = repositoryId ? (repos.data ?? []).find((r) => r.id === repositoryId) : undefined;
+
+  // The filter can arrive as ?repo= from the repository cards, so clearing it
+  // must also drop the param; otherwise a reload silently re-applies it.
+  function clearRepositoryFilter() {
+    setRepositoryId(null);
+    const params = new URLSearchParams(window.location.search);
+    params.delete("repo");
+    const suffix = params.toString();
+    window.history.replaceState({}, "", suffix ? `/runs?${suffix}` : "/runs");
+  }
 
   return (
     <div>
@@ -62,6 +76,18 @@ export function Runs() {
         <div className="flex items-center gap-2">
           <SectionLabel index="01">Runs</SectionLabel>
           <span className="font-mono text-[11px] text-[#5E626E]">{runs.data ? `${visible.length}/${runs.data.length}` : "…"}</span>
+          {repositoryId && (
+            <button
+              type="button"
+              onClick={clearRepositoryFilter}
+              className="flex h-6 items-center gap-1 rounded-full border border-[#5E6AD2]/40 bg-[#5E6AD2]/10 px-2 font-mono text-[10px] text-[#BDC2FF] hover:bg-[#5E6AD2]/20"
+              title="Clear the repository filter"
+              aria-label="Clear the repository filter"
+            >
+              {scopedRepo ? repositoryLabel({ repositoryPath: scopedRepo.localPath ?? "" }, [scopedRepo], scopedRepo.id) : repositoryId}
+              <Icon name="close" size={12} />
+            </button>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="relative">

@@ -171,7 +171,11 @@ type GitHubPanelView = "choose" | "github" | "manual";
 
 export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
   const { status, statusLoading, statusError, onRefreshStatus, repositoryPath, onRepositoryPathChange, selectedRepository, onIssueLoaded, selectedIssueNumber, autoOpenGitHub, onChoiceChange } = props;
-  const [view, setView] = useState<GitHubPanelView>(() => (autoOpenGitHub || selectedRepository ? "github" : "choose"));
+  // A pre-filled reference (Repositories → Analyse) must be visible and editable
+  // on arrival, so the panel opens on manual entry instead of the login prompt.
+  const [view, setView] = useState<GitHubPanelView>(() =>
+    autoOpenGitHub || selectedRepository ? "github" : repositoryPath ? "manual" : "choose",
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

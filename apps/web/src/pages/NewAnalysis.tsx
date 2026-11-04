@@ -182,6 +182,16 @@ export function NewAnalysis() {
   // Browser-local draft persistence: restore once on mount, save on demand.
   // Tokens and GitHub credentials are never written to browser storage.
   useEffect(() => {
+    // A link from another page (Repositories → Analyse) outranks the saved draft.
+    const params = new URLSearchParams(window.location.search);
+    const scoped = params.get("repositoryPath");
+    const scopedSource = params.get("source");
+    if (scopedSource === "local" || scopedSource === "github") setSource(scopedSource);
+    if (scoped) {
+      setRepositoryPath(scoped);
+      if (scopedSource === "github") setGithubChoiceMade(true);
+      return;
+    }
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return;

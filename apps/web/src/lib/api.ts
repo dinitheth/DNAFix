@@ -48,6 +48,8 @@ export interface RepositoryRecord {
   githubRepo: string | null;
   defaultBranch: string | null;
   lastAnalyzedCommitSha: string | null;
+  /** When DNAFix first registered this repository, from the store row. */
+  createdAt: string;
   githubInstallationId?: number | null;
 }
 

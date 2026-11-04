@@ -132,6 +132,10 @@ describe("offline end-to-end pipeline (scripted model test double, no Muse claim
     // Baseline: the fixture test suite must actually be failing before the fix.
     expect(current?.baselineChecks.find((c) => c.kind === "test")?.status).toBe("failed");
     expect(current?.intelligence?.targets[0]?.directImpacted).toContain("src/cart.ts");
+    // Structural analysis records which commit it covered, so the repository view
+    // can tell a current snapshot from one an later commit has overtaken.
+    const analysedRepository = await deps.store.getRepository(current!.repositoryId);
+    expect(analysedRepository?.lastAnalyzedCommitSha).toBe(current?.baseCommitSha);
 
     await runs.transition(current!, "AGENT_EXECUTION");
     await pipeline.process(run.id);
