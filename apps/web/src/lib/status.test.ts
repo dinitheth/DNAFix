@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuditEvent, ConfigStatus } from "./api";
-import { blockingReasons, formatClock, formatDuration, formatSpan, formatStarted, readinessItems, repositoryLabel, runAttempts, runStages, stageOfAction, stageTimings } from "./status";
+import { blockingReasons, formatClock, formatDuration, formatSpan, formatStarted, lastStartedStage, readinessItems, repositoryLabel, runAttempts, runStages, stageOfAction, stageTimings } from "./status";
 
 const config = (over: Partial<ConfigStatus> = {}): ConfigStatus => ({
   model: { provider: "meta-muse-wonder", modelId: "muse-wonder-1.0", subAgentModelId: "muse-spark-1.3", configured: true, transport: "responses", baseUrl: "https://api.meta.ai/v1" },
@@ -58,7 +58,14 @@ describe("run stage timeline", () => {
   });
 });
 
-const audit = (action: string, createdAt: string): AuditEvent => ({ id: `${action}-${createdAt}`, actor: "system", action, result: "ok", evidence: null, createdAt });
+const audit = (action: string, createdAt: string, result: AuditEvent["result"] = "ok", evidence: string | null = null): AuditEvent => ({
+  id: `${action}-${createdAt}`,
+  actor: "system",
+  action,
+  result,
+  evidence,
+  createdAt,
+});
 
 describe("stage timings from the audit log", () => {
   it("times each stage between its own events and the next stage's first later event", () => {
@@ -78,6 +85,7 @@ describe("stage timings from the audit log", () => {
     expect(timings.coding.startedAt).toBe("2026-01-01T00:05:00.000Z");
     expect(timings.coding.durationMs).toBeNull();
     expect(timings.review.startedAt).toBeNull();
+    expect(timings.scanning.evidence).toMatchObject({ action: "verification.baseline" });
   });
 
   it("ends the stage that was in progress when the run stopped", () => {
@@ -115,12 +123,42 @@ describe("stage timings from the audit log", () => {
     expect(formatSpan(925)).toBe("925ms");
   });
 
+  it("anchors evidence on the failing audit record and keeps its detail", () => {
+    const timings = stageTimings(
+      [
+        audit("workflow.project_dna_analysis", "2026-01-01T00:00:00Z"),
+        audit("project-dna.analysis", "2026-01-01T00:00:09Z", "error", "snapshot=s1 complete=false"),
+      ],
+      { state: "IMPACT_ANALYSIS", updatedAt: "2026-01-01T00:00:09Z" },
+    );
+    expect(timings.dna.evidence).toMatchObject({ action: "project-dna.analysis", result: "error", detail: "snapshot=s1 complete=false" });
+    expect(timings.dna.events).toBe(2);
+  });
+
   it("reads stage starts from the recorded workflow transitions", () => {
     expect(stageOfAction("workflow.repository_preparation")).toBe("scanning");
     expect(stageOfAction("workflow.awaiting_plan_approval")).toBe("planning");
     expect(stageOfAction("workflow.agent_execution")).toBe("coding");
     expect(stageOfAction("workflow.completed")).toBe("review");
     expect(stageOfAction("workflow.blocked")).toBeNull();
+  });
+
+  it("places a stage-less blocked outcome on the stage the audit trail last recorded", () => {
+    const events = [
+      audit("workflow.repository_preparation", "2026-01-01T00:00:00Z"),
+      audit("verification.baseline", "2026-01-01T00:00:02Z"),
+      audit("workflow.project_dna_analysis", "2026-01-01T00:00:05Z"),
+    ];
+    const timings = stageTimings(events, { state: "BLOCKED", updatedAt: "2026-01-01T00:00:06Z" });
+    expect(lastStartedStage(timings)).toBe("dna");
+    expect(runStages({ state: "BLOCKED" }, lastStartedStage(timings)).map((s) => s.status)).toEqual([
+      "completed",
+      "blocked",
+      "pending",
+      "pending",
+      "pending",
+      "pending",
+    ]);
   });
 
   it("times only the current attempt when a run was blocked and resumed", () => {

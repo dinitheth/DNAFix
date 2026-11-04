@@ -5,7 +5,7 @@ import { Icon } from "../components/Icon";
 import { Button, SectionLabel, Skeleton, StatusPill } from "../components/ui";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import { api, type AuditEvent, type Run, type RunMcpView, type RunVerification, type VerificationCheckView, type VerificationWaiverView } from "../lib/api";
-import { formatClock, formatSpan, runAttempts, runStages, stageTimings, stateLabel, stateTone, type StageStatus } from "../lib/status";
+import { formatClock, formatSpan, lastStartedStage, runAttempts, runStages, stageTimings, stateLabel, stateTone, type StageStatus } from "../lib/status";
 
 const API = "/api/v1";
 
@@ -164,8 +164,8 @@ function CheckList({ checks, waivers }: { checks: VerificationCheckView[]; waive
 }
 
 function Pipeline({ run, audit }: { run: Run; audit: AuditEvent[] }) {
-  const stages = runStages(run);
   const timings = stageTimings(audit, run);
+  const stages = runStages(run, lastStartedStage(timings));
   const attempts = runAttempts(audit);
   const done = stages.filter((s) => s.status === "completed").length;
 
@@ -202,6 +202,41 @@ function Pipeline({ run, audit }: { run: Run; audit: AuditEvent[] }) {
           );
         })}
       </ol>
+      {stages.some((s) => timings[s.id].startedAt) && (
+        <table className="mt-2 w-full table-fixed text-left">
+          <thead>
+            <tr className="border-b border-[#26282E]">
+              <th className="w-[150px] px-2 py-1 font-mono text-[10px] font-medium uppercase text-[#5E626E]">Stage</th>
+              <th className="w-[80px] px-2 py-1 font-mono text-[10px] font-medium uppercase text-[#5E626E]">Started</th>
+              <th className="w-[80px] px-2 py-1 font-mono text-[10px] font-medium uppercase text-[#5E626E]">Completed</th>
+              <th className="w-[70px] px-2 py-1 font-mono text-[10px] font-medium uppercase text-[#5E626E]">Duration</th>
+              <th className="w-[104px] px-2 py-1 font-mono text-[10px] font-medium uppercase text-[#5E626E]">Result</th>
+              <th className="px-2 py-1 font-mono text-[10px] font-medium uppercase text-[#5E626E]">Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stages
+              .filter((stage) => timings[stage.id].startedAt)
+              .map((stage) => {
+                const timing = timings[stage.id];
+                const meta = STAGE[stage.status];
+                const detail = timing.evidence?.detail ?? "";
+                return (
+                  <tr key={stage.id} className="border-b border-[#26282E]/60 last:border-0">
+                    <td className="truncate px-2 py-1 text-[12px] text-[#ECEEF0]">{stage.label}</td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-[#8A8F98]" title={timing.startedAt ? new Date(timing.startedAt).toLocaleString() : undefined}>{formatClock(timing.startedAt)}</td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-[#8A8F98]" title={timing.endedAt ? new Date(timing.endedAt).toLocaleString() : undefined}>{formatClock(timing.endedAt)}</td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-[#8A8F98]">{formatSpan(timing.durationMs) || "—"}</td>
+                    <td className={`px-2 py-1 font-mono text-[11px] ${meta.className}`}>{meta.label}</td>
+                    <td className="max-w-0 truncate px-2 py-1 font-mono text-[11px] text-[#5E626E]" title={detail ? `${timing.evidence?.action} ${detail}` : timing.evidence?.action}>
+                      {timing.evidence ? `${timing.evidence.action}${detail ? ` · ${detail}` : ""}` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

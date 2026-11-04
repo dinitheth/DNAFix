@@ -157,9 +157,12 @@ const STAGE_ORDER: Array<{ id: StageId; label: string; states: string[] }> = [
 ];
 
 /** Timeline derived from the run's actual backend state. No percentages, no invented progress. */
-export function runStages(run: Pick<Run, "state">): Stage[] {
+export function runStages(run: Pick<Run, "state">, stoppedStage?: StageId | null): Stage[] {
   const { state } = run;
-  const currentIndex = STAGE_ORDER.findIndex((s) => s.states.includes(state));
+  let currentIndex = STAGE_ORDER.findIndex((s) => s.states.includes(state));
+  // BLOCKED, FAILED and CANCELLED do not name a stage, so the caller supplies
+  // the last stage the audit trail recorded instead of defaulting to stage one.
+  if (currentIndex === -1 && stoppedStage) currentIndex = STAGE_ORDER.findIndex((s) => s.id === stoppedStage);
   return STAGE_ORDER.map((stage, index) => {
     let status: StageStatus = "pending";
     if (state === "COMPLETED") status = "completed";
@@ -219,6 +222,8 @@ export interface StageTiming {
   endedAt: string | null;
   durationMs: number | null;
   events: number;
+  /** The audit record that best describes how the stage ended. */
+  evidence: { action: string; detail: string | null; result: string } | null;
 }
 
 const STOPPED_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
@@ -232,19 +237,23 @@ const STOPPED_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
  */
 export function stageTimings(audit: AuditEvent[], run: Pick<Run, "state" | "updatedAt">): Record<StageId, StageTiming> {
   const from = attemptStart(audit);
-  const times = new Map<StageId, number[]>();
+  const byStage = new Map<StageId, AuditEvent[]>();
   for (const event of audit) {
     const stage = stageOfAction(event.action);
     const ms = Date.parse(event.createdAt);
     if (!stage || Number.isNaN(ms)) continue;
     if (from !== null && ms < from) continue;
-    const list = times.get(stage);
-    if (list) list.push(ms);
-    else times.set(stage, [ms]);
+    const list = byStage.get(stage);
+    if (list) list.push(event);
+    else byStage.set(stage, [event]);
+  }
+  const times = new Map<StageId, number[]>();
+  for (const [stage, list] of byStage) {
+    list.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    times.set(stage, list.map((e) => Date.parse(e.createdAt)));
   }
 
   const stoppedAt = STOPPED_STATES.includes(run.state) ? Date.parse(run.updatedAt) : NaN;
-  for (const list of times.values()) list.sort((a, b) => a - b);
   const ids = STAGE_ORDER.map((s) => s.id);
   const result = {} as Record<StageId, StageTiming>;
 
@@ -260,14 +269,27 @@ export function stageTimings(audit: AuditEvent[], run: Pick<Run, "state" | "upda
       }
       if (endedMs === null && !Number.isNaN(stoppedAt) && startedMs <= stoppedAt) endedMs = stoppedAt;
     }
+    const events = byStage.get(id) ?? [];
+    const failing = events.find((e) => e.result === "error");
+    const anchor = failing ?? events[events.length - 1];
     result[id] = {
       startedAt: startedMs === null ? null : new Date(startedMs).toISOString(),
       endedAt: endedMs === null ? null : new Date(endedMs).toISOString(),
       durationMs: startedMs !== null && endedMs !== null && endedMs >= startedMs ? endedMs - startedMs : null,
-      events: own.length,
+      events: events.length,
+      evidence: anchor ? { action: anchor.action, detail: anchor.evidence, result: anchor.result } : null,
     };
   });
   return result;
+}
+
+/** The furthest stage the audit trail recorded, used to place a BLOCKED/FAILED outcome on the right stage. */
+export function lastStartedStage(timings: Record<StageId, StageTiming>): StageId | null {
+  for (let index = STAGE_ORDER.length - 1; index >= 0; index -= 1) {
+    const id = STAGE_ORDER[index]?.id;
+    if (id && timings[id]?.startedAt) return id;
+  }
+  return null;
 }
 
 /** Wall-clock stamp for the dense pipeline band: `03:12:45`, never a guess. */
