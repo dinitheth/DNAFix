@@ -17,6 +17,7 @@ export default defineConfig({
       "@dnafix/repository-intelligence": pkg("repository-intelligence"),
       "@dnafix/model-provider": pkg("model-provider"),
       "@dnafix/github": pkg("github"),
+      "@dnafix/mcp": pkg("mcp"),
       "@dnafix/agent-orchestrator": pkg("agent-orchestrator"),
       "@dnafix/application": pkg("application"),
     },

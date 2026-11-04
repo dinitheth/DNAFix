@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Button, SectionLabel, Skeleton, StatusPill } from "../components/ui";
-import { api, type AuditEvent, type Run } from "../lib/api";
+import { api, type AuditEvent, type McpApproval, type Run, type RunMcpView } from "../lib/api";
 import { runStages, stateLabel, stateTone, type StageStatus } from "../lib/status";
 
 const API = "/api/v1";
@@ -128,10 +128,58 @@ function Pipeline({ run }: { run: Run }) {
   );
 }
 
+function McpApprovalCard({
+  approval,
+  busy,
+  onApprove,
+  onDeny,
+}: {
+  approval: McpApproval;
+  busy: boolean;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-[#2E3038] bg-[#141518] p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-[11px] leading-[18px] text-[#ECEEF0]">
+          {approval.serverName}/{approval.toolName}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <StatusPill tone={approval.kind === "per-call" ? "danger" : "warning"}>
+            {approval.kind === "per-call" ? "Level 3 · per-call" : "Level 2 · run grant"}
+          </StatusPill>
+          <span className="font-mono text-[10px] text-[#5E626E]">expires {new Date(approval.expiresAt).toLocaleTimeString()}</span>
+        </div>
+      </div>
+      <p className="mt-1 text-[12px] leading-4 text-[#8A8F98]">{approval.summary}</p>
+      <p className="mt-1 text-[12px] leading-4 text-[#E5A158]">{approval.consequences}</p>
+      <details className="mt-1">
+        <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.03em] text-[#5E626E]">Redacted arguments · hash {approval.argumentsHash.slice(0, 12)}</summary>
+        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-[#26282E] bg-[#0F1013] p-2 font-mono text-[10px] leading-4 text-[#8A8F98]">
+          {JSON.stringify(approval.argumentsRedacted, null, 2)}
+        </pre>
+      </details>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-[10px] text-[#5E626E]">correlation {approval.correlationId}</span>
+        <div className="flex items-center gap-1.5">
+          <Button variant="danger-ghost" disabled={busy} onClick={onDeny}>
+            Deny
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={onApprove}>
+            Approve once
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RunDetail() {
   const { id } = useParams();
   const run = useQuery({ queryKey: ["run", id], queryFn: () => api<Run>(`/runs/${id}`), refetchInterval: 5_000 });
   const audit = useQuery({ queryKey: ["audit", id], queryFn: () => api<AuditEvent[]>(`/audit?runId=${id}`), refetchInterval: 5_000 });
+  const mcpView = useQuery({ queryKey: ["run-mcp", id], queryFn: () => api<RunMcpView>(`/runs/${id}/mcp`), refetchInterval: 3_000 });
   const [clarification, setClarification] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
@@ -141,6 +189,7 @@ export function RunDetail() {
     source.addEventListener("state", () => {
       void run.refetch();
       void audit.refetch();
+      void mcpView.refetch();
     });
     return () => source.close();
   }, [id]);
@@ -152,6 +201,7 @@ export function RunDetail() {
       await api(`/runs/${id}${path}`, { method: "POST", body: body ? JSON.stringify(body) : undefined });
       await run.refetch();
       await audit.refetch();
+      await mcpView.refetch();
     } catch (err) {
       setActionError((err as Error).message);
     } finally {
@@ -181,6 +231,7 @@ export function RunDetail() {
   const r = run.data!;
   const terminal = ["COMPLETED", "FAILED", "CANCELLED"].includes(r.state);
   const verificationReady = r.verificationChecks || r.diff;
+  const pendingMcp = (mcpView.data?.approvals ?? []).filter((a) => a.status === "pending");
 
   return (
     <div>
@@ -203,6 +254,35 @@ export function RunDetail() {
       </header>
 
       <Pipeline run={r} />
+
+      {pendingMcp.length > 0 && (
+        <section className="mb-3 rounded-xl border border-[#E5A158]/40 bg-[#1A1B20] p-3 shadow-sm" aria-label="MCP approval required">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Icon name="pan_tool" size={15} className="text-[#E5A158]" />
+              <h2 className="text-[13px] font-medium leading-[18px] text-[#ECEEF0]">MCP approval required</h2>
+              <StatusPill tone="warning">{pendingMcp.length} waiting</StatusPill>
+            </div>
+            <Button variant="danger-ghost" loading={acting === "mcp-cancel"} onClick={() => act("mcp-cancel", "/mcp/cancel")}>
+              Deny all & cancel pending
+            </Button>
+          </div>
+          <p className="text-[12px] leading-4 text-[#8A8F98]">
+            The agent is paused until you decide. Approval applies only to the exact invocation shown (Level 3) or to a run-scoped grant for this tool (Level 2). Denied calls never execute.
+          </p>
+          <div className="mt-2 flex flex-col gap-2">
+            {pendingMcp.map((approval) => (
+              <McpApprovalCard
+                key={approval.id}
+                approval={approval}
+                busy={acting !== null}
+                onApprove={() => act(`mcp-approve-${approval.id}`, `/mcp/approvals/${approval.id}`, { decision: "approve" })}
+                onDeny={() => act(`mcp-deny-${approval.id}`, `/mcp/approvals/${approval.id}`, { decision: "deny" })}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {r.error && (
         <p className="mb-3 rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
@@ -464,6 +544,61 @@ export function RunDetail() {
               </ul>
             </RailCard>
           )}
+
+          <RailCard
+            icon="hub"
+            title="MCP Activity"
+            actions={
+              <Link to="/connectors" className="text-[11px] text-[#BDC2FF] hover:text-white hover:underline">
+                Manage
+              </Link>
+            }
+          >
+            {mcpView.isLoading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : (
+              <>
+                <p className="text-[11px] leading-4 text-[#5E626E]">
+                  {pendingMcp.length > 0 ? `${pendingMcp.length} approval(s) waiting — the run is paused.` : "No MCP approval is waiting."}
+                </p>
+                <ul className="mt-1 flex flex-col">
+                  {(mcpView.data?.activity ?? []).slice(0, 8).map((call) => (
+                    <li key={call.id} className="border-b border-[#26282E]/60 py-1.5 last:border-0 first:pt-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="truncate font-mono text-[11px] leading-[18px] text-[#ECEEF0]" title={`${call.serverName}/${call.toolName}`}>
+                          {call.serverName}/{call.toolName}
+                        </span>
+                        <StatusPill tone={call.success ? "success" : call.executed ? "danger" : "neutral"}>
+                          {call.success ? "ran" : call.executed ? "failed" : "not run"}
+                        </StatusPill>
+                        <span className="ml-auto font-mono text-[10px] text-[#5E626E]">{call.agent === "coding-agent" ? "coding" : "verifier"}</span>
+                      </div>
+                      <p className="mt-0.5 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]" title={call.error ?? call.resultSummary ?? ""}>
+                        {call.error ?? call.resultSummary ?? "No result recorded."}
+                      </p>
+                    </li>
+                  ))}
+                  {(mcpView.data?.activity ?? []).length === 0 && (
+                    <li className="py-1.5 text-[12px] leading-4 text-[#5E626E]">No MCP tool calls were made in this run.</li>
+                  )}
+                </ul>
+                {(mcpView.data?.approvals ?? []).length > 0 && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.03em] text-[#5E626E]">
+                      Approval history ({(mcpView.data?.approvals ?? []).length})
+                    </summary>
+                    <ul className="mt-1">
+                      {(mcpView.data?.approvals ?? []).map((approval) => (
+                        <li key={approval.id} className="border-b border-[#26282E]/60 py-1 text-[11px] leading-4 text-[#8A8F98] last:border-0">
+                          <span className="font-mono text-[10px] text-[#ECEEF0]">{approval.serverName}/{approval.toolName}</span> · {approval.kind} · {approval.status}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
+            )}
+          </RailCard>
 
           <RailCard icon="history" title="Audit History">
             {audit.isLoading && <Skeleton className="h-20 w-full" />}

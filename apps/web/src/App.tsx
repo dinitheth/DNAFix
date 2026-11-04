@@ -9,6 +9,7 @@ import { NewAnalysis } from "./pages/NewAnalysis";
 import { Overview } from "./pages/Overview";
 import { RunDetail } from "./pages/RunDetail";
 import { Settings } from "./pages/Settings";
+import { Connectors } from "./pages/Connectors";
 
 const TERMINAL_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
 
@@ -17,6 +18,7 @@ const PAGES = [
   { label: "New Analysis", to: "/new", icon: "add_circle" },
   { label: "Runs", to: "/#runs", icon: "commit" },
   { label: "Repositories", to: "/#repositories", icon: "source_environment" },
+  { label: "Connectors", to: "/connectors", icon: "hub" },
   { label: "Settings", to: "/settings", icon: "settings" },
 ] as const;
 
@@ -159,12 +161,15 @@ function Shell() {
       ? "New Analysis"
       : location.pathname === "/settings"
         ? "Settings"
-        : "Overview";
+        : location.pathname === "/connectors"
+          ? "Connectors"
+          : "Overview";
 
   const overviewActive = location.pathname === "/" && location.hash !== "#runs" && location.hash !== "#repositories";
   const runsActive = location.pathname.startsWith("/runs/") || (location.pathname === "/" && location.hash === "#runs");
   const reposActive = location.pathname === "/" && location.hash === "#repositories";
   const newActive = location.pathname === "/new";
+  const connectorsActive = location.pathname === "/connectors";
   const settingsActive = location.pathname === "/settings";
 
   useEffect(() => {
@@ -236,6 +241,13 @@ function Shell() {
               <span className={itemClass(reposActive)}>
                 <Icon name="source_environment" size={16} className={iconClass(reposActive)} />
                 Repositories
+              </span>
+            </Link>
+
+            <Link to="/connectors" aria-current={connectorsActive ? "page" : undefined} className={navClass(connectorsActive)}>
+              <span className={itemClass(connectorsActive)}>
+                <Icon name="hub" size={16} className={iconClass(connectorsActive)} />
+                Connectors
               </span>
             </Link>
           </nav>
@@ -356,6 +368,9 @@ function Shell() {
             <Link to="/#runs" aria-label="Runs" className={iconClass(runsActive)}>
               <Icon name="commit" size={18} />
             </Link>
+            <Link to="/connectors" aria-label="Connectors" className={iconClass(connectorsActive)}>
+              <Icon name="hub" size={18} />
+            </Link>
             <Link to="/settings" aria-label="Settings" className={iconClass(settingsActive)}>
               <Icon name="settings" size={18} />
             </Link>
@@ -372,6 +387,7 @@ function Shell() {
               <Route path="/" element={<Overview />} />
               <Route path="/new" element={<NewAnalysis />} />
               <Route path="/runs/:id" element={<RunDetail />} />
+              <Route path="/connectors" element={<Connectors />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>

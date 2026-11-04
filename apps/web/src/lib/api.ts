@@ -254,3 +254,155 @@ export interface GitHubSelectRepositoryResponse {
   repository: GitHubRepository;
   record: RepositoryRecord;
 }
+
+/* --------------------------- MCP connectors --------------------------- */
+
+export type McpConnectionState =
+  | "not-configured"
+  | "not-detected"
+  | "not-connected"
+  | "connecting"
+  | "connected"
+  | "disabled"
+  | "authentication-required"
+  | "connection-error";
+
+export type McpPermissionLevel = 1 | 2 | 3;
+export type McpRisk = "low" | "medium" | "high";
+export type McpAgentRole = "coding-agent" | "verification-agent";
+
+export interface McpProfile {
+  id: string;
+  name: string;
+  description: string | null;
+  serverNames: string[];
+}
+
+export interface McpDetection {
+  platform: string;
+  hostLabel: string;
+  supportedHost: boolean;
+  cli: { available: boolean; path: string | null; version: string | null; error: string | null; wrapperOnly: boolean };
+  desktop: { pluginAvailable: boolean; pluginVersion: string | null; running: boolean | null; statusDetail: string };
+  toolkit: {
+    available: boolean;
+    version: string | null;
+    enabled: boolean | null;
+    featureDetail: string;
+    gatewayAvailable: boolean;
+    gatewayDetail: string;
+  };
+  profiles: McpProfile[] | null;
+  profilesError: string | null;
+  checkedAt: string;
+  summary: string;
+  nextAction: string | null;
+}
+
+export interface McpParameterSummary {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string | null;
+}
+
+export interface McpToolView {
+  serverName: string;
+  name: string;
+  description: string;
+  modelName: string;
+  inputSchema: Record<string, unknown>;
+  parameterSummary: McpParameterSummary[];
+  permissionLevel: McpPermissionLevel;
+  reviewed: boolean;
+  schemaValid: boolean;
+  enabled: boolean;
+  allowedAgents: McpAgentRole[];
+  reviewedLevel: McpPermissionLevel | null;
+  risk: McpRisk;
+  permissionLabel: string;
+}
+
+export interface McpServerView {
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  allowedAgents: McpAgentRole[];
+  toolCount: number;
+  health: "reachable" | "no-tools-reported" | "not-connected";
+}
+
+export interface McpApproval {
+  id: string;
+  runId: string;
+  connectionId: "docker-desktop-mcp";
+  serverName: string;
+  toolName: string;
+  kind: "per-call" | "run-grant";
+  permissionLevel: McpPermissionLevel;
+  correlationId: string;
+  argumentsRedacted: Record<string, unknown>;
+  argumentsHash: string;
+  summary: string;
+  consequences: string;
+  status: "pending" | "approved" | "denied" | "expired" | "cancelled";
+  requestedAt: string;
+  expiresAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+}
+
+export interface McpInvocation {
+  id: string;
+  correlationId: string;
+  runId: string | null;
+  connectionId: "docker-desktop-mcp";
+  serverName: string;
+  toolName: string;
+  agent: McpAgentRole;
+  modelId: string;
+  permissionLevel: McpPermissionLevel;
+  approvalId: string | null;
+  approvalStatus: string;
+  executed: boolean;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  success: boolean;
+  argumentsRedacted: Record<string, unknown>;
+  resultSummary: string | null;
+  error: string | null;
+}
+
+export interface McpConnectorView {
+  id: "docker-desktop-mcp";
+  provider: "docker-desktop-mcp";
+  state: McpConnectionState;
+  enabled: boolean;
+  reason: string;
+  nextAction: string | null;
+  profileId: string | null;
+  selectedProfile: McpProfile | null;
+  profiles: McpProfile[] | null;
+  detection: McpDetection;
+  lastError: string | null;
+  lastConnectedAt: string | null;
+  lastHandshakeAt: string | null;
+  gateway: { serverInfo: { name: string; version: string; description?: string }; capabilities: Record<string, unknown> } | null;
+  servers: McpServerView[];
+  tools: McpToolView[];
+  resources: Array<{ uri: string; name: string; description: string | null }>;
+  prompts: Array<{ name: string; description: string | null }>;
+  serverCount: number;
+  toolCount: number;
+  enabledToolCount: number;
+  inventory: { fetchedAt: string; fingerprint: string; warnings: string[] } | null;
+  activity: McpInvocation[];
+  approvals: McpApproval[];
+  checkedAt: string;
+}
+
+export interface RunMcpView {
+  approvals: McpApproval[];
+  activity: McpInvocation[];
+}

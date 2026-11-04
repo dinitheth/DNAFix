@@ -354,6 +354,16 @@ The live connection/import path is **implemented but not yet verified against Gi
 
 ---
 
+## MCP connectors
+
+The top-level **Connectors** page can attach Docker Desktop's MCP Toolkit as optional, permission-controlled evidence for agents. GitHub App auth and MCP auth are separate. DNAFix reads existing Docker MCP profiles, launches the documented `docker mcp gateway run --profile <id> --transport stdio --block-secrets` command over the official MCP SDK, and reports `connected` only after a real handshake and discovery. It never installs Docker, starts Docker Desktop, edits profiles, or installs servers.
+
+Tools are enabled separately per server, tool and agent. Unknown tools default to disabled Level 3 and require explicit human review. Level 2 calls need a per-run grant; Level 3 calls need per-call human approval, and denied, expired or cancelled calls never execute. Results are treated as untrusted data, secrets are redacted, and every invocation is audited. See [`docs/MCP_CONNECTORS.md`](docs/MCP_CONNECTORS.md).
+
+The live gateway path is **implemented but not verified against a running Docker Desktop in this environment**; tests use a mocked MCP client only.
+
+---
+
 ## Data model and persistence
 
 The `Store` port abstracts persistence. The local default is an atomic JSON file store (single-user development); a memory store backs tests. The production relational model is defined in `packages/persistence/migrations/0001_initial.sql` (apply with `pnpm db:migrate` when `DATABASE_URL` and the `pg` driver are present) covering: users, GitHub installations, repositories, workflow runs, analysis snapshots, impact reports, implementation plans, agent tasks/sessions, tool invocations, worktrees, verification runs, pull requests, audit events and user approvals — with foreign keys, indexes, lifecycle fields and idempotency keys. The PostgreSQL adapter itself is not yet wired (see Limitations).
@@ -632,6 +642,7 @@ Useful scripts: `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm bu
 - [`docs/SECURITY.md`](docs/SECURITY.md) — trust boundaries and controls
 - [`docs/INTEGRATION_PROJECT_DNA.md`](docs/INTEGRATION_PROJECT_DNA.md) — bridge design and setup
 - [`docs/MODEL_INTEGRATION.md`](docs/MODEL_INTEGRATION.md) — endpoint verification, transport decision
+- [`docs/MCP_CONNECTORS.md`](docs/MCP_CONNECTORS.md) — Docker Desktop MCP setup, permission model and approvals
 - [`docs/AWS_EXECUTION.md`](docs/AWS_EXECUTION.md) — remote execution proposal, provisioning record, blockers
 - [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) — what is verified, blocked, or untested
 - [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md) — discovery findings and staged plan

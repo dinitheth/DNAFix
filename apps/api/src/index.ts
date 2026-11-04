@@ -7,6 +7,7 @@ import { Pipeline, RunService, createDefaultDeps } from "@dnafix/application";
 import { CreateRunRequestSchema } from "@dnafix/contracts";
 import { GitHubError, GitHubIntegrationService, GitHubNotConfiguredError, verifyWebhookSignature } from "@dnafix/github";
 import { GitHubConnectionManager, readGitHubSessionId, registerGitHubRoutes } from "./github.js";
+import { registerMcpRoutes } from "./mcp.js";
 
 const deps = createDefaultDeps();
 const runs = new RunService(deps);
@@ -57,6 +58,12 @@ app.setErrorHandler((error, req, reply) => {
 // Register after the auth hook and error handler so every integration route is
 // covered by the optional bearer gate and the structured GitHub error mapping.
 registerGitHubRoutes(app, { manager: githubConnections, integration: githubIntegration });
+if (deps.mcp) registerMcpRoutes(app, { connector: deps.mcp });
+
+// Close the Docker MCP Gateway child process when the API shuts down.
+app.addHook("onClose", async () => {
+  await deps.mcp?.shutdown().catch(() => undefined);
+});
 
 function kick(runId: string): void {
   void pipeline.process(runId).catch((err: Error) => app.log.error({ err, runId }, "pipeline error"));
@@ -209,6 +216,7 @@ app.post("/api/v1/runs/:id/cancel", async (req, reply) => {
   if (!run) return;
   if (["COMPLETED", "FAILED", "CANCELLED"].includes(run.state)) return reply.code(409).send({ error: `Run already ${run.state}` });
   await runs.requestRemoteCancellation(run).catch(() => undefined);
+  await deps.mcp?.cancelRun(run.id).catch(() => undefined);
   run.state = "CANCELLED";
   await runs.save(run);
   await runs.audit(run.id, run.repositoryId, "user", "run.cancelled", "ok", null);

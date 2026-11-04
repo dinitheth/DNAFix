@@ -326,10 +326,220 @@ export const AuditEventSchema = z.object({
   id: z.string().min(1),
   runId: z.string().nullable(),
   repositoryId: z.string().nullable(),
-  actor: z.enum(["user", "lead-planner", "coding-agent", "verification-agent", "system"]),
+  actor: z.enum(["user", "lead-planner", "coding-agent", "verification-agent", "mcp-orchestrator", "system"]),
   action: z.string().min(1),
   result: z.enum(["ok", "error", "info"]),
   evidence: z.string().nullable(),
   createdAt: z.string().min(1),
 });
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+/* ------------------------------------------------------------------ */
+/* MCP connectors                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Connection states are deliberately explicit. `connected` is only ever
+ * reported after a real MCP initialize handshake; it is never derived from
+ * Docker CLI presence or a profile selection.
+ */
+export const MCP_CONNECTION_STATES = [
+  "not-configured",
+  "not-detected",
+  "not-connected",
+  "connecting",
+  "connected",
+  "disabled",
+  "authentication-required",
+  "connection-error",
+] as const;
+export const McpConnectionStateSchema = z.enum(MCP_CONNECTION_STATES);
+export type McpConnectionState = z.infer<typeof McpConnectionStateSchema>;
+
+export const McpAgentRoleSchema = z.enum(["coding-agent", "verification-agent"]);
+export type McpAgentRole = z.infer<typeof McpAgentRoleSchema>;
+
+export const McpPermissionLevelSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+export type McpPermissionLevel = z.infer<typeof McpPermissionLevelSchema>;
+
+export const McpRiskSchema = z.enum(["low", "medium", "high"]);
+export type McpRisk = z.infer<typeof McpRiskSchema>;
+
+export const McpProfileIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "profile id must be alphanumeric with '.', '_' or '-'");
+
+export const McpProfileSchema = z.object({
+  id: McpProfileIdSchema,
+  name: z.string(),
+  description: z.string().nullable().default(null),
+  serverNames: z.array(z.string()).default([]),
+});
+export type McpProfile = z.infer<typeof McpProfileSchema>;
+
+export const McpParameterSummarySchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  required: z.boolean(),
+  description: z.string().nullable().default(null),
+});
+export type McpParameterSummary = z.infer<typeof McpParameterSummarySchema>;
+
+export const McpToolAnnotationsSchema = z
+  .object({
+    title: z.string().optional(),
+    readOnlyHint: z.boolean().optional(),
+    destructiveHint: z.boolean().optional(),
+    idempotentHint: z.boolean().optional(),
+    openWorldHint: z.boolean().optional(),
+  })
+  .partial()
+  .passthrough();
+export type McpToolAnnotations = z.infer<typeof McpToolAnnotationsSchema>;
+
+export const McpDiscoveredToolSchema = z.object({
+  serverName: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string(),
+  /** Stable, sanitized name exposed to the model. The exact MCP name is preserved above. */
+  modelName: z.string().regex(/^[A-Za-z0-9_.-]+$/).max(64),
+  inputSchema: z.record(z.string(), z.unknown()),
+  parameterSummary: z.array(McpParameterSummarySchema).default([]),
+  annotations: McpToolAnnotationsSchema.nullable().default(null),
+  permissionLevel: McpPermissionLevelSchema,
+  /** True only when the explicit reviewed policy classified this tool. */
+  reviewed: z.boolean(),
+  schemaValid: z.boolean(),
+});
+export type McpDiscoveredTool = z.infer<typeof McpDiscoveredToolSchema>;
+
+export const McpInventorySchema = z.object({
+  gateway: z.object({
+    name: z.string(),
+    version: z.string(),
+    instructions: z.string().nullable().default(null),
+    capabilities: z.record(z.string(), z.unknown()).default({}),
+  }),
+  tools: z.array(McpDiscoveredToolSchema),
+  resources: z.array(z.object({ uri: z.string(), name: z.string(), description: z.string().nullable().default(null) })).default([]),
+  prompts: z.array(z.object({ name: z.string(), description: z.string().nullable().default(null) })).default([]),
+  /** Server names reported by the selected Docker profile, when Docker CLI inspection succeeded. */
+  profileServers: z.array(z.string()).default([]),
+  fetchedAt: z.string().min(1),
+  fingerprint: z.string().min(1),
+  warnings: z.array(z.string()).default([]),
+});
+export type McpInventory = z.infer<typeof McpInventorySchema>;
+
+export const McpConnectionRecordSchema = z.object({
+  id: z.literal("docker-desktop-mcp"),
+  provider: z.literal("docker-desktop-mcp"),
+  profileId: z.string().nullable(),
+  enabled: z.boolean(),
+  state: McpConnectionStateSchema,
+  lastError: z.string().nullable(),
+  lastConnectedAt: z.string().nullable(),
+  lastHandshakeAt: z.string().nullable(),
+  inventory: McpInventorySchema.nullable(),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+export type McpConnectionRecord = z.infer<typeof McpConnectionRecordSchema>;
+
+export const McpToolPermissionRecordSchema = z.object({
+  connectionId: z.literal("docker-desktop-mcp"),
+  serverName: z.string().min(1),
+  toolName: z.string().min(1),
+  enabled: z.boolean(),
+  allowedAgents: z.array(McpAgentRoleSchema),
+  /** Explicit human review override. Null means only the built-in reviewed policy applies. */
+  reviewedLevel: McpPermissionLevelSchema.nullable(),
+  reviewedAt: z.string().nullable(),
+  updatedAt: z.string().min(1),
+});
+export type McpToolPermissionRecord = z.infer<typeof McpToolPermissionRecordSchema>;
+
+export const McpServerPermissionRecordSchema = z.object({
+  connectionId: z.literal("docker-desktop-mcp"),
+  serverName: z.string().min(1),
+  enabled: z.boolean(),
+  allowedAgents: z.array(McpAgentRoleSchema),
+  updatedAt: z.string().min(1),
+});
+export type McpServerPermissionRecord = z.infer<typeof McpServerPermissionRecordSchema>;
+
+export const McpApprovalRecordSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  connectionId: z.literal("docker-desktop-mcp"),
+  serverName: z.string().min(1),
+  toolName: z.string().min(1),
+  kind: z.enum(["per-call", "run-grant"]),
+  permissionLevel: McpPermissionLevelSchema,
+  correlationId: z.string().min(1),
+  argumentsRedacted: z.record(z.string(), z.unknown()),
+  argumentsHash: z.string().min(1),
+  summary: z.string().min(1),
+  consequences: z.string().min(1),
+  status: z.enum(["pending", "approved", "denied", "expired", "cancelled"]),
+  requestedAt: z.string().min(1),
+  expiresAt: z.string().min(1),
+  decidedAt: z.string().nullable(),
+  decidedBy: z.string().nullable(),
+});
+export type McpApprovalRecord = z.infer<typeof McpApprovalRecordSchema>;
+
+export const McpRunGrantRecordSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  connectionId: z.literal("docker-desktop-mcp"),
+  serverName: z.string().min(1),
+  toolName: z.string().min(1),
+  permissionLevel: McpPermissionLevelSchema,
+  workspaceScope: z.string().nullable(),
+  createdAt: z.string().min(1),
+});
+export type McpRunGrantRecord = z.infer<typeof McpRunGrantRecordSchema>;
+
+export const McpInvocationRecordSchema = z.object({
+  id: z.string().min(1),
+  correlationId: z.string().min(1),
+  runId: z.string().nullable(),
+  connectionId: z.literal("docker-desktop-mcp"),
+  serverName: z.string().min(1),
+  toolName: z.string().min(1),
+  agent: McpAgentRoleSchema,
+  modelId: z.string(),
+  permissionLevel: McpPermissionLevelSchema,
+  approvalId: z.string().nullable(),
+  approvalStatus: z.string(),
+  /** True only when the gateway call was actually attempted after all checks. */
+  executed: z.boolean().default(false),
+  startedAt: z.string().min(1),
+  completedAt: z.string().nullable(),
+  durationMs: z.number().nonnegative().nullable(),
+  success: z.boolean(),
+  argumentsRedacted: z.record(z.string(), z.unknown()),
+  resultSummary: z.string().max(4_000).nullable(),
+  error: z.string().max(2_000).nullable(),
+});
+export type McpInvocationRecord = z.infer<typeof McpInvocationRecordSchema>;
+
+export const McpApprovalDecisionSchema = z.object({
+  decision: z.enum(["approve", "deny"]),
+});
+export type McpApprovalDecision = z.infer<typeof McpApprovalDecisionSchema>;
+
+export const McpPermissionUpdateSchema = z.object({
+  serverName: z.string().min(1),
+  toolName: z.string().min(1).optional(),
+  enabled: z.boolean(),
+  allowedAgents: z.array(McpAgentRoleSchema).optional(),
+  /** Present only when a human explicitly reviewed an otherwise-unclassified tool. */
+  reviewedLevel: McpPermissionLevelSchema.optional(),
+});
+export type McpPermissionUpdate = z.infer<typeof McpPermissionUpdateSchema>;
+
+export const McpProfileSelectionSchema = z.object({ profileId: McpProfileIdSchema });

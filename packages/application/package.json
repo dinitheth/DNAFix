@@ -12,6 +12,7 @@
     "@dnafix/execution": "workspace:*",
     "@dnafix/git-engine": "workspace:*",
     "@dnafix/github": "workspace:*",
+    "@dnafix/mcp": "workspace:*",
     "@dnafix/model-provider": "workspace:*",
     "@dnafix/persistence": "workspace:*",
     "@dnafix/remote-execution": "workspace:*",

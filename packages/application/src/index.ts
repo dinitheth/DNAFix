@@ -7,6 +7,7 @@ import { assertTransition, canRunInParallel, findOverlappingChanges, integration
 import { createCommandRunner, type CommandRunner } from "@dnafix/execution";
 import { GitWorktreeManager, cloneRepository, cloneRepositoryWithToken } from "@dnafix/git-engine";
 import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
+import { McpConnectorService } from "@dnafix/mcp";
 import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
 import { FileStore, type RunRecord, type Store } from "@dnafix/persistence";
 import { ProjectDNAAdapter, RepositoryIntelligenceError, type RepositoryIntelligence } from "@dnafix/repository-intelligence";
@@ -29,12 +30,14 @@ export interface PipelineDeps {
   dataRoot: string;
   maxRepairAttempts: number;
   sandboxNote: string;
+  /** Docker Desktop MCP connector. Optional: absent disables the MCP evidence phase entirely. */
+  mcp?: McpConnectorService | null;
 }
 
 export function createDefaultDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
   const dataRoot = process.env.DNAFIX_DATA_DIR ?? path.resolve(process.cwd(), ".data");
   const runner = createCommandRunner();
-  return {
+  const base: PipelineDeps = {
     store: new FileStore(path.join(dataRoot, "dnafix.json")),
     intelligence: new ProjectDNAAdapter(),
     model: createModelProviderFromEnv(),
@@ -48,8 +51,11 @@ export function createDefaultDeps(overrides: Partial<PipelineDeps> = {}): Pipeli
     dataRoot,
     maxRepairAttempts: Number(process.env.MAX_REPAIR_ATTEMPTS ?? 2),
     sandboxNote: runner.mode === "docker" ? "docker" : "host (reduced isolation — explicit SANDBOX_MODE=host)",
-    ...overrides,
   };
+  const merged: PipelineDeps = { ...base, ...overrides };
+  // Bind the connector to the store that is actually used (tests inject stores).
+  if (overrides.mcp === undefined) merged.mcp = new McpConnectorService({ store: merged.store });
+  return merged;
 }
 
 const now = () => new Date().toISOString();
@@ -387,7 +393,17 @@ export class Pipeline {
           record.worktreePath = wt.path;
           record.branch = wt.branch;
           try {
-            const result = await codingAgent.execute(task, { issueTitle: run.issueTitle, issueBody: run.issueBody, worktreePath: wt.path });
+            const result = await codingAgent.execute(task, {
+              issueTitle: run.issueTitle,
+              issueBody: run.issueBody,
+              worktreePath: wt.path,
+              mcp: this.deps.mcp
+                ? { runtime: this.deps.mcp, runId: run.id, repositoryId: run.repositoryId, signal: this.deps.mcp.signalForRun(run.id) }
+                : undefined,
+            });
+            if (result.mcp?.warning) {
+              await this.runs.audit(run.id, run.repositoryId, "mcp-orchestrator", `task.${task.id}.mcp`, "error", result.mcp.warning);
+            }
             const { changedPaths } = await worktrees.collectDiff(wt.path);
             record.changedPaths = changedPaths;
             record.commitSha = await worktrees.commitAll(wt.path, `dnafix(${run.id}): ${task.title}`);
@@ -466,14 +482,30 @@ export class Pipeline {
             run.plan!.predictedAffectedPaths.map((p) => p.path),
             run.changedPaths,
           );
-          run.verifierReview = await verifier.review({
+          const reviewInput = {
             issueTitle: run.issueTitle,
             acceptanceCriteria: run.plan!.tasks.flatMap((t) => t.acceptanceCriteria),
             predictedPaths: run.plan!.predictedAffectedPaths.map((p) => p.path),
             changedPaths: run.changedPaths,
             diff: run.diff,
             checks: run.verificationChecks,
-          });
+          };
+          if (this.deps.mcp) {
+            const { review, mcp: mcpPhase } = await verifier.reviewWithMcp(reviewInput, {
+              runtime: this.deps.mcp,
+              runId: run.id,
+              repositoryId: run.repositoryId,
+              signal: this.deps.mcp.signalForRun(run.id),
+            });
+            run.verifierReview = review;
+            if (mcpPhase.warning) {
+              await this.runs.audit(run.id, run.repositoryId, "mcp-orchestrator", "verification.mcp", "error", mcpPhase.warning);
+            } else if (mcpPhase.calls > 0) {
+              await this.runs.audit(run.id, run.repositoryId, "verification-agent", "verification.mcp", "ok", `calls=${mcpPhase.calls}`);
+            }
+          } else {
+            run.verifierReview = await verifier.review(reviewInput);
+          }
           await this.runs.audit(
             run.id,
             run.repositoryId,
@@ -511,7 +543,18 @@ export class Pipeline {
           try {
             // Repair tasks carry no approvedDeletions, so the deny-by-default
             // deletion policy rejects any delete they attempt (eval-v1 finding).
-            await codingAgent.execute(repairTask, { issueTitle: run.issueTitle, issueBody: run.issueBody, worktreePath: integration.path, failureContext });
+            const repair = await codingAgent.execute(repairTask, {
+              issueTitle: run.issueTitle,
+              issueBody: run.issueBody,
+              worktreePath: integration.path,
+              failureContext,
+              mcp: this.deps.mcp
+                ? { runtime: this.deps.mcp, runId: run.id, repositoryId: run.repositoryId, signal: this.deps.mcp.signalForRun(run.id) }
+                : undefined,
+            });
+            if (repair.mcp?.warning) {
+              await this.runs.audit(run.id, run.repositoryId, "mcp-orchestrator", "repair.mcp", "error", repair.mcp.warning);
+            }
           } catch (err) {
             await this.runs.audit(run.id, run.repositoryId, "lead-planner", "repair.rejected", "error", err instanceof Error ? err.message.slice(0, 500) : String(err));
             continue; // counts as a failed repair attempt; loop re-verifies and enforces the attempt bound
@@ -578,6 +621,8 @@ export class Pipeline {
       await this.runs.audit(fresh.id, fresh.repositoryId, "system", blocked ? "workflow.blocked" : "workflow.failed", "error", message.slice(0, 1000));
       if (blocked && fresh.state !== "BLOCKED") await this.runs.transition(fresh, "BLOCKED").catch(() => undefined);
       else if (!blocked && fresh.state !== "FAILED") await this.runs.transition(fresh, "FAILED").catch(() => undefined);
+    } finally {
+      this.deps.mcp?.releaseRun(runId);
     }
   }
 }

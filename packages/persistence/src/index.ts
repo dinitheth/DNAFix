@@ -4,6 +4,12 @@ import type {
   AuditEvent,
   ImplementationPlan,
   IssueAnalysis,
+  McpApprovalRecord,
+  McpConnectionRecord,
+  McpInvocationRecord,
+  McpRunGrantRecord,
+  McpServerPermissionRecord,
+  McpToolPermissionRecord,
   RepositoryIntelligenceReport,
   VerificationCheck,
   VerifierReview,
@@ -137,6 +143,20 @@ export interface Store {
   saveGitHubConnection(connection: GitHubConnectionRecord): Promise<void>;
   getGitHubConnection(sessionId: string): Promise<GitHubConnectionRecord | null>;
   deleteGitHubConnection(sessionId: string): Promise<void>;
+  saveMcpConnection(connection: McpConnectionRecord): Promise<void>;
+  getMcpConnection(id: string): Promise<McpConnectionRecord | null>;
+  listMcpConnections(): Promise<McpConnectionRecord[]>;
+  saveMcpToolPermission(permission: McpToolPermissionRecord): Promise<void>;
+  listMcpToolPermissions(connectionId?: string): Promise<McpToolPermissionRecord[]>;
+  saveMcpServerPermission(permission: McpServerPermissionRecord): Promise<void>;
+  listMcpServerPermissions(connectionId?: string): Promise<McpServerPermissionRecord[]>;
+  saveMcpRunGrant(grant: McpRunGrantRecord): Promise<void>;
+  listMcpRunGrants(runId?: string): Promise<McpRunGrantRecord[]>;
+  saveMcpApproval(approval: McpApprovalRecord): Promise<void>;
+  getMcpApproval(id: string): Promise<McpApprovalRecord | null>;
+  listMcpApprovals(filter?: { runId?: string; status?: McpApprovalRecord["status"] }): Promise<McpApprovalRecord[]>;
+  saveMcpInvocation(invocation: McpInvocationRecord): Promise<void>;
+  listMcpInvocations(filter?: { runId?: string; limit?: number }): Promise<McpInvocationRecord[]>;
 }
 
 interface DbShape {
@@ -144,9 +164,26 @@ interface DbShape {
   runs: RunRecord[];
   audit: AuditEvent[];
   githubConnections: GitHubConnectionRecord[];
+  mcpConnections: McpConnectionRecord[];
+  mcpToolPermissions: McpToolPermissionRecord[];
+  mcpServerPermissions: McpServerPermissionRecord[];
+  mcpRunGrants: McpRunGrantRecord[];
+  mcpApprovals: McpApprovalRecord[];
+  mcpInvocations: McpInvocationRecord[];
 }
 
-const emptyDb = (): DbShape => ({ repositories: [], runs: [], audit: [], githubConnections: [] });
+const emptyDb = (): DbShape => ({
+  repositories: [],
+  runs: [],
+  audit: [],
+  githubConnections: [],
+  mcpConnections: [],
+  mcpToolPermissions: [],
+  mcpServerPermissions: [],
+  mcpRunGrants: [],
+  mcpApprovals: [],
+  mcpInvocations: [],
+});
 
 export class MemoryStore implements Store {
   private db: DbShape = emptyDb();
@@ -184,6 +221,61 @@ export class MemoryStore implements Store {
   async deleteGitHubConnection(sessionId: string): Promise<void> {
     this.db.githubConnections = this.db.githubConnections.filter((c) => c.sessionId !== sessionId);
   }
+  async saveMcpConnection(connection: McpConnectionRecord): Promise<void> {
+    this.db.mcpConnections = [...this.db.mcpConnections.filter((c) => c.id !== connection.id), structuredClone(connection)];
+  }
+  async getMcpConnection(id: string): Promise<McpConnectionRecord | null> {
+    const connection = this.db.mcpConnections.find((c) => c.id === id);
+    return connection ? structuredClone(connection) : null;
+  }
+  async listMcpConnections(): Promise<McpConnectionRecord[]> {
+    return structuredClone(this.db.mcpConnections);
+  }
+  async saveMcpToolPermission(permission: McpToolPermissionRecord): Promise<void> {
+    this.db.mcpToolPermissions = [
+      ...this.db.mcpToolPermissions.filter((p) => !(p.connectionId === permission.connectionId && p.serverName === permission.serverName && p.toolName === permission.toolName)),
+      structuredClone(permission),
+    ];
+  }
+  async listMcpToolPermissions(connectionId?: string): Promise<McpToolPermissionRecord[]> {
+    return structuredClone(this.db.mcpToolPermissions.filter((p) => !connectionId || p.connectionId === connectionId));
+  }
+  async saveMcpServerPermission(permission: McpServerPermissionRecord): Promise<void> {
+    this.db.mcpServerPermissions = [
+      ...this.db.mcpServerPermissions.filter((p) => !(p.connectionId === permission.connectionId && p.serverName === permission.serverName)),
+      structuredClone(permission),
+    ];
+  }
+  async listMcpServerPermissions(connectionId?: string): Promise<McpServerPermissionRecord[]> {
+    return structuredClone(this.db.mcpServerPermissions.filter((p) => !connectionId || p.connectionId === connectionId));
+  }
+  async saveMcpRunGrant(grant: McpRunGrantRecord): Promise<void> {
+    this.db.mcpRunGrants = [...this.db.mcpRunGrants.filter((g) => g.id !== grant.id), structuredClone(grant)];
+  }
+  async listMcpRunGrants(runId?: string): Promise<McpRunGrantRecord[]> {
+    return structuredClone(this.db.mcpRunGrants.filter((g) => !runId || g.runId === runId));
+  }
+  async saveMcpApproval(approval: McpApprovalRecord): Promise<void> {
+    this.db.mcpApprovals = [...this.db.mcpApprovals.filter((a) => a.id !== approval.id), structuredClone(approval)];
+  }
+  async getMcpApproval(id: string): Promise<McpApprovalRecord | null> {
+    const approval = this.db.mcpApprovals.find((a) => a.id === id);
+    return approval ? structuredClone(approval) : null;
+  }
+  async listMcpApprovals(filter: { runId?: string; status?: McpApprovalRecord["status"] } = {}): Promise<McpApprovalRecord[]> {
+    return structuredClone(
+      this.db.mcpApprovals.filter((a) => (!filter.runId || a.runId === filter.runId) && (!filter.status || a.status === filter.status)),
+    );
+  }
+  async saveMcpInvocation(invocation: McpInvocationRecord): Promise<void> {
+    this.db.mcpInvocations = [...this.db.mcpInvocations.filter((i) => i.id !== invocation.id), structuredClone(invocation)];
+  }
+  async listMcpInvocations(filter: { runId?: string; limit?: number } = {}): Promise<McpInvocationRecord[]> {
+    const items = this.db.mcpInvocations
+      .filter((i) => !filter.runId || i.runId === filter.runId)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    return structuredClone(filter.limit ? items.slice(0, filter.limit) : items);
+  }
 }
 
 /** JSON-file store for single-user local development. Atomic replace on every write. Postgres schema lives in ./drizzle-schema.ts + migrations/. */
@@ -201,6 +293,12 @@ export class FileStore implements Store {
         runs: parsed.runs ?? [],
         audit: parsed.audit ?? [],
         githubConnections: parsed.githubConnections ?? [],
+        mcpConnections: parsed.mcpConnections ?? [],
+        mcpToolPermissions: parsed.mcpToolPermissions ?? [],
+        mcpServerPermissions: parsed.mcpServerPermissions ?? [],
+        mcpRunGrants: parsed.mcpRunGrants ?? [],
+        mcpApprovals: parsed.mcpApprovals ?? [],
+        mcpInvocations: parsed.mcpInvocations ?? [],
       };
     } catch {
       this.db = emptyDb();
@@ -274,5 +372,72 @@ export class FileStore implements Store {
     await this.mutate((db) => {
       db.githubConnections = db.githubConnections.filter((c) => c.sessionId !== sessionId);
     });
+  }
+  async saveMcpConnection(connection: McpConnectionRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.mcpConnections = [...db.mcpConnections.filter((c) => c.id !== connection.id), structuredClone(connection)];
+    });
+  }
+  async getMcpConnection(id: string): Promise<McpConnectionRecord | null> {
+    const connection = (await this.load()).mcpConnections.find((c) => c.id === id);
+    return connection ? structuredClone(connection) : null;
+  }
+  async listMcpConnections(): Promise<McpConnectionRecord[]> {
+    return structuredClone((await this.load()).mcpConnections);
+  }
+  async saveMcpToolPermission(permission: McpToolPermissionRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.mcpToolPermissions = [
+        ...db.mcpToolPermissions.filter((p) => !(p.connectionId === permission.connectionId && p.serverName === permission.serverName && p.toolName === permission.toolName)),
+        structuredClone(permission),
+      ];
+    });
+  }
+  async listMcpToolPermissions(connectionId?: string): Promise<McpToolPermissionRecord[]> {
+    return structuredClone((await this.load()).mcpToolPermissions.filter((p) => !connectionId || p.connectionId === connectionId));
+  }
+  async saveMcpServerPermission(permission: McpServerPermissionRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.mcpServerPermissions = [
+        ...db.mcpServerPermissions.filter((p) => !(p.connectionId === permission.connectionId && p.serverName === permission.serverName)),
+        structuredClone(permission),
+      ];
+    });
+  }
+  async listMcpServerPermissions(connectionId?: string): Promise<McpServerPermissionRecord[]> {
+    return structuredClone((await this.load()).mcpServerPermissions.filter((p) => !connectionId || p.connectionId === connectionId));
+  }
+  async saveMcpRunGrant(grant: McpRunGrantRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.mcpRunGrants = [...db.mcpRunGrants.filter((g) => g.id !== grant.id), structuredClone(grant)];
+    });
+  }
+  async listMcpRunGrants(runId?: string): Promise<McpRunGrantRecord[]> {
+    return structuredClone((await this.load()).mcpRunGrants.filter((g) => !runId || g.runId === runId));
+  }
+  async saveMcpApproval(approval: McpApprovalRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.mcpApprovals = [...db.mcpApprovals.filter((a) => a.id !== approval.id), structuredClone(approval)];
+    });
+  }
+  async getMcpApproval(id: string): Promise<McpApprovalRecord | null> {
+    const approval = (await this.load()).mcpApprovals.find((a) => a.id === id);
+    return approval ? structuredClone(approval) : null;
+  }
+  async listMcpApprovals(filter: { runId?: string; status?: McpApprovalRecord["status"] } = {}): Promise<McpApprovalRecord[]> {
+    return structuredClone(
+      (await this.load()).mcpApprovals.filter((a) => (!filter.runId || a.runId === filter.runId) && (!filter.status || a.status === filter.status)),
+    );
+  }
+  async saveMcpInvocation(invocation: McpInvocationRecord): Promise<void> {
+    await this.mutate((db) => {
+      db.mcpInvocations = [...db.mcpInvocations.filter((i) => i.id !== invocation.id), structuredClone(invocation)];
+    });
+  }
+  async listMcpInvocations(filter: { runId?: string; limit?: number } = {}): Promise<McpInvocationRecord[]> {
+    const items = (await this.load()).mcpInvocations
+      .filter((i) => !filter.runId || i.runId === filter.runId)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    return structuredClone(filter.limit ? items.slice(0, filter.limit) : items);
   }
 }
