@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/Icon";
 import { NotificationsBell } from "./components/NotificationsBell";
@@ -21,16 +21,24 @@ import { Runs } from "./pages/Runs";
 
 const TERMINAL_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
 
-const PAGES = [
-  { label: "Overview", to: "/", icon: "grid_view" },
-  { label: "New Analysis", to: "/new", icon: "add_circle" },
-  { label: "Runs", to: "/runs", icon: "commit" },
-  { label: "Approvals", to: "/approvals", icon: "pan_tool" },
-  { label: "Repositories", to: "/repositories", icon: "source_environment" },
-  { label: "Connectors", to: "/connectors", icon: "hub" },
-  { label: "Docs", to: "/docs", icon: "menu_book" },
-  { label: "Settings", to: "/settings", icon: "settings" },
-] as const;
+/** The sidebar is grouped by what the operator is doing; the palette and breadcrumb read the same list. */
+const NAV: Array<{ group: string; label: string; to: string; icon: string }> = [
+  { group: "Workspace", label: "Overview", to: "/", icon: "grid_view" },
+  { group: "Workspace", label: "New Analysis", to: "/new", icon: "add_circle" },
+  { group: "Workspace", label: "Runs", to: "/runs", icon: "commit" },
+  { group: "Workspace", label: "Repositories", to: "/repositories", icon: "source_environment" },
+  { group: "Review", label: "Approvals", to: "/approvals", icon: "pan_tool" },
+  { group: "Integrations", label: "Connectors", to: "/connectors", icon: "hub" },
+  { group: "System", label: "Settings", to: "/settings", icon: "settings" },
+];
+
+const PAGES = [...NAV, { group: "System", label: "Docs", to: "/docs", icon: "menu_book" }];
+
+function isActive(pathname: string, to: string): boolean {
+  if (to === "/") return pathname === "/";
+  if (to === "/runs" || to === "/connectors") return pathname === to || pathname.startsWith(`${to}/`);
+  return pathname === to;
+}
 
 function navClass(active: boolean): string {
   return `flex items-center justify-between rounded-md px-1.5 py-1.5 transition-colors ${
@@ -169,31 +177,9 @@ function Shell() {
   const waitingApprovals = pendingApprovals.data?.length ?? 0;
 
   const runMatch = /^\/runs\/(.+)$/.exec(location.pathname);
-  const pageTitle = runMatch
-    ? `Run ${runMatch[1]}`
-    : location.pathname === "/runs"
-      ? "Runs"
-      : location.pathname === "/approvals"
-        ? "Approvals"
-        : location.pathname === "/repositories"
-          ? "Repositories"
-          : location.pathname === "/new"
-            ? "New Analysis"
-            : location.pathname === "/settings"
-              ? "Settings"
-              : location.pathname.startsWith("/connectors")
-                ? "Connectors"
-                : location.pathname === "/docs"
-                  ? "Docs"
-                  : "Overview";
-
-  const overviewActive = location.pathname === "/";
-  const runsActive = location.pathname === "/runs" || location.pathname.startsWith("/runs/");
-  const approvalsActive = location.pathname === "/approvals";
-  const reposActive = location.pathname === "/repositories";
-  const newActive = location.pathname === "/new";
-  const connectorsActive = location.pathname.startsWith("/connectors");
-  const settingsActive = location.pathname === "/settings";
+  const currentPage = PAGES.find((page) => isActive(location.pathname, page.to));
+  const pageTitle = runMatch ? `Run ${runMatch[1]}` : currentPage?.label ?? "Overview";
+  const pageGroup = runMatch ? "Workspace" : currentPage?.group ?? "Workspace";
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -228,72 +214,45 @@ function Shell() {
             <span className="rounded border border-[#2E3038] bg-[#222329] px-1.5 py-0.5 font-mono text-[10px] leading-[14px] text-[#8A8F98]">v0.1.0</span>
           </div>
 
-          <div className="px-2 py-1.5">
-            <span className="block px-1.5 py-1 text-[11px] font-medium uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">Workbench</span>
-          </div>
-
-          <nav className="flex flex-col gap-0.5 px-1.5" aria-label="Primary">
-            <Link to="/" aria-current={overviewActive ? "page" : undefined} className={navClass(overviewActive)}>
-              <span className={itemClass(overviewActive)}>
-                <Icon name="grid_view" size={16} className={iconClass(overviewActive)} />
-                Overview
-              </span>
-            </Link>
-
-            <Link to="/new" aria-current={newActive ? "page" : undefined} className={navClass(newActive)}>
-              <span className={itemClass(newActive)}>
-                <Icon name="add_circle" size={16} className={iconClass(newActive)} />
-                New Analysis
-              </span>
-            </Link>
-
-            <Link to="/runs" aria-current={runsActive ? "page" : undefined} className={navClass(runsActive)}>
-              <span className={itemClass(runsActive)}>
-                <Icon name="commit" size={16} className={iconClass(runsActive)} />
-                Runs
-              </span>
-              {activeRuns > 0 && (
-                <span className="flex items-center gap-1 rounded-full bg-[#27A567]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#34D399]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#34D399]" aria-hidden />
-                  {activeRuns} active
-                </span>
-              )}
-            </Link>
-
-            <Link to="/approvals" aria-current={approvalsActive ? "page" : undefined} className={navClass(approvalsActive)}>
-              <span className={itemClass(approvalsActive)}>
-                <Icon name="pan_tool" size={16} className={iconClass(approvalsActive)} />
-                Approvals
-              </span>
-              {waitingApprovals > 0 && (
-                <span className="flex items-center gap-1 rounded-full bg-[#E5A158]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#E5A158]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#E5A158]" aria-hidden />
-                  {waitingApprovals} waiting
-                </span>
-              )}
-            </Link>
-
-            <Link to="/repositories" aria-current={reposActive ? "page" : undefined} className={navClass(reposActive)}>
-              <span className={itemClass(reposActive)}>
-                <Icon name="source_environment" size={16} className={iconClass(reposActive)} />
-                Repositories
-              </span>
-            </Link>
-
-            <Link to="/connectors" aria-current={connectorsActive ? "page" : undefined} className={navClass(connectorsActive)}>
-              <span className={itemClass(connectorsActive)}>
-                <Icon name="hub" size={16} className={iconClass(connectorsActive)} />
-                Connectors
-              </span>
-            </Link>
+          <nav className="flex flex-col gap-0.5 px-1.5 pb-1.5" aria-label="Primary">
+            {NAV.map((item, index) => {
+              const active = isActive(location.pathname, item.to);
+              const waiting = item.to === "/approvals" ? waitingApprovals : 0;
+              const running = item.to === "/runs" ? activeRuns : 0;
+              return (
+                <Fragment key={item.to}>
+                  {(index === 0 || NAV[index - 1]?.group !== item.group) && (
+                    <span className="block px-1.5 pb-1 pt-3 text-[11px] font-medium uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">
+                      {item.group}
+                    </span>
+                  )}
+                  <Link to={item.to} aria-current={active ? "page" : undefined} className={navClass(active)}>
+                    <span className={itemClass(active)}>
+                      <Icon name={item.icon} size={16} className={iconClass(active)} />
+                      {item.label}
+                    </span>
+                    {waiting > 0 && (
+                      <span className="flex items-center gap-1 rounded-full bg-[#E5A158]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#E5A158]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#E5A158]" aria-hidden />
+                        {waiting} waiting
+                      </span>
+                    )}
+                    {running > 0 && (
+                      <span className="flex items-center gap-1 rounded-full bg-[#27A567]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#34D399]">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#34D399]" aria-hidden />
+                        {running} active
+                      </span>
+                    )}
+                  </Link>
+                </Fragment>
+              );
+            })}
           </nav>
         </div>
 
         <div className="flex flex-col gap-1.5 border-t border-[#26282E]/60 p-1.5">
           <div
-            className={`flex items-center justify-between rounded-md border px-1.5 py-1.5 ${
-              blockers > 0 || config.isError ? "border-[#2E3038] bg-[#1F2026]" : "border-[#2E3038] bg-[#1F2026]"
-            }`}
+            className="flex items-center justify-between rounded-md border border-[#2E3038] bg-[#1F2026] px-1.5 py-1.5"
             title={blockers > 0 ? `${blockers} required action${blockers > 1 ? "s" : ""} before an analysis can start` : "All readiness checks pass"}
           >
             <div className="flex items-center gap-2">
@@ -322,15 +281,6 @@ function Shell() {
             </span>
           </div>
 
-          <nav aria-label="Settings">
-            <Link to="/settings" aria-current={settingsActive ? "page" : undefined} className={navClass(settingsActive)}>
-              <span className={itemClass(settingsActive)}>
-                <Icon name="settings" size={16} className={iconClass(settingsActive)} />
-                Settings
-              </span>
-            </Link>
-          </nav>
-
           <Link to="/settings" className="flex items-center justify-between rounded-md px-1.5 py-1.5 transition-colors hover:bg-[#222329]">
             <span className="flex items-center gap-2.5">
               <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[#2E3038] bg-[#282A31]">
@@ -351,9 +301,7 @@ function Shell() {
           </div>
 
           <div className="hidden items-center gap-1.5 text-[13px] lg:flex">
-            <Link to="/" className="text-[#8A8F98] transition-colors hover:text-[#ECEEF0]">
-              Workspace
-            </Link>
+            <span className="text-[#8A8F98]">{pageGroup}</span>
             <span className="text-[#5E626E]">/</span>
             <span className="font-medium text-[#ECEEF0]">{pageTitle}</span>
           </div>
@@ -393,24 +341,11 @@ function Shell() {
 
           <div className="flex items-center gap-3 lg:hidden">
             <NotificationsBell />
-            <Link to="/" aria-label="Overview" className={iconClass(overviewActive)}>
-              <Icon name="grid_view" size={18} />
-            </Link>
-            <Link to="/new" aria-label="New Analysis" className={iconClass(newActive)}>
-              <Icon name="add_circle" size={18} />
-            </Link>
-            <Link to="/runs" aria-label="Runs" className={iconClass(runsActive)}>
-              <Icon name="commit" size={18} />
-            </Link>
-            <Link to="/approvals" aria-label="Approvals" className={iconClass(approvalsActive)}>
-              <Icon name="pan_tool" size={18} />
-            </Link>
-            <Link to="/connectors" aria-label="Connectors" className={iconClass(connectorsActive)}>
-              <Icon name="hub" size={18} />
-            </Link>
-            <Link to="/settings" aria-label="Settings" className={iconClass(settingsActive)}>
-              <Icon name="settings" size={18} />
-            </Link>
+            {NAV.map((item) => (
+              <Link key={item.to} to={item.to} aria-label={item.label} className={iconClass(isActive(location.pathname, item.to))}>
+                <Icon name={item.icon} size={18} />
+              </Link>
+            ))}
             <span className="flex items-center gap-1.5">
               <span className={`h-1.5 w-1.5 rounded-full ${health.dot}`} aria-hidden />
               <span className={`font-mono text-[10px] ${health.label === "Online" ? "text-[#34D399]" : "text-[#8A8F98]"}`}>{health.label}</span>
