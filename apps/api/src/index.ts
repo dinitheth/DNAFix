@@ -130,7 +130,7 @@ function configStatusPayload() {
       transport: process.env.MODEL_TRANSPORT ?? "responses",
       baseUrl: process.env.MODEL_API_BASE_URL ?? "https://api.meta.ai/v1",
     },
-    projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH), path: process.env.PROJECT_DNA_PATH ?? null },
+    projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH?.trim()), path: process.env.PROJECT_DNA_PATH?.trim() || null },
     github: {
       configured: deps.github.configured,
       appConfigured: deps.github.appConfigured,
@@ -147,7 +147,7 @@ function configStatusPayload() {
       region: process.env.AWS_REGION ?? "ap-southeast-2",
     },
     workflowEngine: process.env.WORKFLOW_ENGINE === "temporal" ? "temporal" : "in-process-durable",
-    temporalAddress: process.env.TEMPORAL_ADDRESS ?? null,
+    temporalAddress: process.env.TEMPORAL_ADDRESS?.trim() || null,
     store: describeStore(deps.store),
   };
 }

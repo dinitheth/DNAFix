@@ -842,7 +842,10 @@ export class Pipeline {
         (err as { blocked?: boolean }).blocked === true;
       fresh.error = message;
       await this.runs.save(fresh);
-      await this.runs.audit(fresh.id, fresh.repositoryId, "system", blocked ? "workflow.blocked" : "workflow.failed", "error", message.slice(0, 1000));
+      // Distinct action name from the workflow.<STATE> transition rows: this one
+      // carries why the run stopped, and the transition that follows records where
+      // it stopped. Same label twice reads as a duplicated event.
+      await this.runs.audit(fresh.id, fresh.repositoryId, "system", blocked ? "run.blocked" : "run.failed", "error", message.slice(0, 1000));
       if (blocked && fresh.state !== "BLOCKED") await this.runs.transition(fresh, "BLOCKED").catch(() => undefined);
       else if (!blocked && fresh.state !== "FAILED") await this.runs.transition(fresh, "FAILED").catch(() => undefined);
     } finally {
