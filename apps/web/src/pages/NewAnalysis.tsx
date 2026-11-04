@@ -73,6 +73,7 @@ export function NewAnalysis() {
 
   const [callbackNotice, setCallbackNotice] = useState<CallbackNotice | null>(readCallbackNotice);
   const [source, setSource] = useState<Source>(() => (callbackNotice ? "github" : "local"));
+  const [githubChoiceMade, setGithubChoiceMade] = useState(false);
   const [repositoryPath, setRepositoryPath] = useState("");
   const [selectedRepository, setSelectedRepository] = useState<GitHubRepository | null>(null);
   const [issueTitle, setIssueTitle] = useState("");
@@ -96,7 +97,7 @@ export function NewAnalysis() {
   });
 
   const blockers = config.data ? blockingReasons(config.data) : [];
-  const submitDisabled = submitting || !config.data || blockers.length > 0;
+  const submitDisabled = submitting || !config.data || blockers.length > 0 || (source === "github" && !githubChoiceMade);
 
   const savedLocalRepositories = useMemo(() => (repos.data ?? []).filter((r) => r.localPath).map((r) => ({ id: r.id, label: r.localPath! })), [repos.data]);
 
@@ -114,6 +115,7 @@ export function NewAnalysis() {
   }, [runs.data]);
 
   const importedDirty = Boolean(imported && hasUnsavedIssueEdits({ title: issueTitle, body: issueBody }, imported.issue));
+  const showSpecification = source === "local" || githubChoiceMade;
 
   function validate(): Record<string, string> {
     const next: Record<string, string> = {};
@@ -218,6 +220,7 @@ export function NewAnalysis() {
 
   function chooseSource(next: Source) {
     setSource(next);
+    if (next === "github") setGithubChoiceMade(Boolean(selectedRepository));
     setErrors((prev) => ({ ...prev, repositoryPath: "" }));
   }
 
@@ -444,6 +447,7 @@ export function NewAnalysis() {
                   onIssueLoaded={(detail) => applyImportedIssue(detail, false)}
                   selectedIssueNumber={imported?.issue.number ?? null}
                   autoOpenGitHub={callbackNotice?.tone === "success"}
+                  onChoiceChange={setGithubChoiceMade}
                 />
                 {!selectedRepository && repositoryPath && (
                   <p className="mt-1.5 text-[11px] leading-4 text-[#8A8F98]">
@@ -459,233 +463,237 @@ export function NewAnalysis() {
             )}
           </section>
 
-          {/* 02 / Issue specification */}
-          <section className="flex flex-col rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm" aria-label="Issue specification">
-            <div className="mb-2 flex items-center justify-between">
-              <SectionLabel index="02">Issue Specification</SectionLabel>
-            </div>
-
-            {pendingImport && (
-              <div className="mb-3 rounded-lg border border-[#E5A158]/30 bg-[#E5A158]/5 p-2" role="alert">
-                <p className="text-[12px] font-medium text-[#E5A158]">
-                  Replace your edited content with {pendingImport.issue.repositoryFullName}#{pendingImport.issue.number}?
-                </p>
-                <p className="mt-0.5 text-[11px] leading-4 text-[#8A8F98]">
-                  The fetched issue differs from what you have typed. DNAFix will not silently overwrite your edits.
-                </p>
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <button type="button" onClick={() => applyImportedIssue({ issue: pendingImport.issue, fetchedAt: pendingImport.fetchedAt, validatedAt: pendingImport.validatedAt, cached: pendingImport.cached, etag: null, installationId: pendingImport.installationId }, true)} className="h-6 rounded bg-[#5E6AD2] px-2 text-[11px] font-medium text-white hover:bg-[#6875E3]">
-                    Replace my edits
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPendingImport(null)}
-                    className="h-6 rounded border border-[#2E3038] px-2 text-[11px] text-[#ECEEF0] hover:border-[#424652]"
-                  >
-                    Keep my edits
-                  </button>
+          {showSpecification && (
+            <>
+              {/* 02 / Issue specification */}
+              <section className="flex flex-col rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm" aria-label="Issue specification">
+                <div className="mb-2 flex items-center justify-between">
+                  <SectionLabel index="02">Issue Specification</SectionLabel>
                 </div>
-              </div>
-            )}
 
-            {imported && (
-              <div className="mb-3 rounded-lg border border-[#2E3038] bg-[#141518]">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#26282E] px-2 py-1.5">
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-[#8A8F98]">
-                      <Icon name="bug_report" size={13} className={imported.issue.state === "open" ? "text-[#34D399]" : "text-[#C084FC]"} />
-                      <span className="font-mono text-[#ECEEF0]">{imported.issue.repositoryFullName}#{imported.issue.number}</span>
-                      <span className="rounded border border-[#2E3038] px-1 font-mono text-[9px] uppercase text-[#8A8F98]">{imported.issue.state}</span>
-                      <span>{imported.cached ? "cached from GitHub" : "fetched live from GitHub"}</span>
-                      <span>· last fetched <FetchedAt iso={imported.fetchedAt} /></span>
-                      <span>· checked <FetchedAt iso={imported.validatedAt} /></span>
+                {pendingImport && (
+                  <div className="mb-3 rounded-lg border border-[#E5A158]/30 bg-[#E5A158]/5 p-2" role="alert">
+                    <p className="text-[12px] font-medium text-[#E5A158]">
+                      Replace your edited content with {pendingImport.issue.repositoryFullName}#{pendingImport.issue.number}?
                     </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => void refreshImported()} disabled={refreshingIssue} className="inline-flex h-6 items-center gap-1 rounded border border-[#2E3038] px-1.5 text-[10px] text-[#8A8F98] hover:text-[#ECEEF0] disabled:opacity-50">
-                      <Icon name="refresh" size={12} className={refreshingIssue ? "animate-spin" : ""} /> Refresh
-                    </button>
-                    <a href={imported.issue.htmlUrl} target="_blank" rel="noreferrer" className="inline-flex h-6 items-center gap-1 rounded border border-[#2E3038] px-1.5 text-[10px] text-[#8A8F98] hover:text-[#ECEEF0]">
-                      <Icon name="open_in_new" size={12} /> Open on GitHub
-                    </a>
-                    {importedDirty && (
-                      <button type="button" onClick={restoreImported} className="h-6 rounded border border-[#E5A158]/40 px-1.5 text-[10px] text-[#E5A158] hover:bg-[#E5A158]/10">
-                        Restore from GitHub
+                    <p className="mt-0.5 text-[11px] leading-4 text-[#8A8F98]">
+                      The fetched issue differs from what you have typed. DNAFix will not silently overwrite your edits.
+                    </p>
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <button type="button" onClick={() => applyImportedIssue({ issue: pendingImport.issue, fetchedAt: pendingImport.fetchedAt, validatedAt: pendingImport.validatedAt, cached: pendingImport.cached, etag: null, installationId: pendingImport.installationId }, true)} className="h-6 rounded bg-[#5E6AD2] px-2 text-[11px] font-medium text-white hover:bg-[#6875E3]">
+                        Replace my edits
                       </button>
-                    )}
-                    <button type="button" onClick={clearImported} className="h-6 rounded px-1.5 text-[10px] text-[#5E626E] hover:text-[#ECEEF0]">
-                      Clear
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingImport(null)}
+                        className="h-6 rounded border border-[#2E3038] px-2 text-[11px] text-[#ECEEF0] hover:border-[#424652]"
+                      >
+                        Keep my edits
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="px-2.5 py-2">
-                  <p className="text-[13px] font-medium leading-[18px] text-[#ECEEF0]">{imported.issue.title}</p>
-                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] leading-[14px] text-[#5E626E]">
-                    {imported.issue.author?.login && <span>opened by {imported.issue.author.login}</span>}
-                    {imported.issue.labels.length > 0 && <span>· {imported.issue.labels.map((l) => l.name).join(", ")}</span>}
-                    {imported.issue.milestone && <span>· milestone {imported.issue.milestone}</span>}
-                    <span>· {imported.issue.comments} comment{imported.issue.comments === 1 ? "" : "s"}</span>
-                  </p>
-                  <pre className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap break-words rounded border border-[#26282E] bg-[#0F1013] p-2 font-mono text-[11px] leading-[17px] text-[#BDC2FF]">
-                    {imported.issue.body ?? "(This issue has no description. Add reproduction details before starting the analysis.)"}
-                  </pre>
-                  {importedDirty && (
-                    <p className="mt-1.5 text-[11px] leading-4 text-[#E5A158]">
-                      The fields below differ from the fetched issue. The original Markdown is preserved above; use “Restore from GitHub” to replace your edits.
+                )}
+
+                {imported && (
+                  <div className="mb-3 rounded-lg border border-[#2E3038] bg-[#141518]">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#26282E] px-2 py-1.5">
+                      <div className="min-w-0">
+                        <p className="flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-[#8A8F98]">
+                          <Icon name="bug_report" size={13} className={imported.issue.state === "open" ? "text-[#34D399]" : "text-[#C084FC]"} />
+                          <span className="font-mono text-[#ECEEF0]">{imported.issue.repositoryFullName}#{imported.issue.number}</span>
+                          <span className="rounded border border-[#2E3038] px-1 font-mono text-[9px] uppercase text-[#8A8F98]">{imported.issue.state}</span>
+                          <span>{imported.cached ? "cached from GitHub" : "fetched live from GitHub"}</span>
+                          <span>· last fetched <FetchedAt iso={imported.fetchedAt} /></span>
+                          <span>· checked <FetchedAt iso={imported.validatedAt} /></span>
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button type="button" onClick={() => void refreshImported()} disabled={refreshingIssue} className="inline-flex h-6 items-center gap-1 rounded border border-[#2E3038] px-1.5 text-[10px] text-[#8A8F98] hover:text-[#ECEEF0] disabled:opacity-50">
+                          <Icon name="refresh" size={12} className={refreshingIssue ? "animate-spin" : ""} /> Refresh
+                        </button>
+                        <a href={imported.issue.htmlUrl} target="_blank" rel="noreferrer" className="inline-flex h-6 items-center gap-1 rounded border border-[#2E3038] px-1.5 text-[10px] text-[#8A8F98] hover:text-[#ECEEF0]">
+                          <Icon name="open_in_new" size={12} /> Open on GitHub
+                        </a>
+                        {importedDirty && (
+                          <button type="button" onClick={restoreImported} className="h-6 rounded border border-[#E5A158]/40 px-1.5 text-[10px] text-[#E5A158] hover:bg-[#E5A158]/10">
+                            Restore from GitHub
+                          </button>
+                        )}
+                        <button type="button" onClick={clearImported} className="h-6 rounded px-1.5 text-[10px] text-[#5E626E] hover:text-[#ECEEF0]">
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-2.5 py-2">
+                      <p className="text-[13px] font-medium leading-[18px] text-[#ECEEF0]">{imported.issue.title}</p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] leading-[14px] text-[#5E626E]">
+                        {imported.issue.author?.login && <span>opened by {imported.issue.author.login}</span>}
+                        {imported.issue.labels.length > 0 && <span>· {imported.issue.labels.map((l) => l.name).join(", ")}</span>}
+                        {imported.issue.milestone && <span>· milestone {imported.issue.milestone}</span>}
+                        <span>· {imported.issue.comments} comment{imported.issue.comments === 1 ? "" : "s"}</span>
+                      </p>
+                      <pre className="mt-1.5 max-h-44 overflow-y-auto whitespace-pre-wrap break-words rounded border border-[#26282E] bg-[#0F1013] p-2 font-mono text-[11px] leading-[17px] text-[#BDC2FF]">
+                        {imported.issue.body ?? "(This issue has no description. Add reproduction details before starting the analysis.)"}
+                      </pre>
+                      {importedDirty && (
+                        <p className="mt-1.5 text-[11px] leading-4 text-[#E5A158]">
+                          The fields below differ from the fetched issue. The original Markdown is preserved above; use “Restore from GitHub” to replace your edits.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mb-3 flex flex-col gap-1">
+                  <label htmlFor="issue-title" className="flex items-center justify-between text-[13px] font-medium leading-[18px] text-[#ECEEF0]">
+                    <span>Issue summary</span>
+                    <span className={`font-mono text-[11px] font-normal leading-[14px] ${issueTitle.length > 500 ? "text-[#E5484D]" : "text-[#5E626E]"}`}>{issueTitle.length}/500 chars</span>
+                  </label>
+                  <input
+                    id="issue-title"
+                    value={issueTitle}
+                    onChange={(e) => setIssueTitle(e.target.value)}
+                    maxLength={500}
+                    aria-invalid={Boolean(errors.issueTitle)}
+                    className={`h-8 w-full rounded-md border bg-[#141518] px-3 text-[13px] leading-[18px] text-[#ECEEF0] transition-colors placeholder:text-[#5E626E] focus:outline-none focus:ring-1 focus:ring-[#5E6AD2] ${
+                      errors.issueTitle ? "border-[#E5484D]" : "border-[#2E3038] focus:border-[#5E6AD2]"
+                    }`}
+                  />
+                  {errors.issueTitle && (
+                    <p className="text-[12px] leading-4 text-[#E5484D]" role="alert">
+                      {errors.issueTitle}
                     </p>
                   )}
                 </div>
-              </div>
-            )}
 
-            <div className="mb-3 flex flex-col gap-1">
-              <label htmlFor="issue-title" className="flex items-center justify-between text-[13px] font-medium leading-[18px] text-[#ECEEF0]">
-                <span>Issue summary</span>
-                <span className={`font-mono text-[11px] font-normal leading-[14px] ${issueTitle.length > 500 ? "text-[#E5484D]" : "text-[#5E626E]"}`}>{issueTitle.length}/500 chars</span>
-              </label>
-              <input
-                id="issue-title"
-                value={issueTitle}
-                onChange={(e) => setIssueTitle(e.target.value)}
-                maxLength={500}
-                aria-invalid={Boolean(errors.issueTitle)}
-                className={`h-8 w-full rounded-md border bg-[#141518] px-3 text-[13px] leading-[18px] text-[#ECEEF0] transition-colors placeholder:text-[#5E626E] focus:outline-none focus:ring-1 focus:ring-[#5E6AD2] ${
-                  errors.issueTitle ? "border-[#E5484D]" : "border-[#2E3038] focus:border-[#5E6AD2]"
-                }`}
-              />
-              {errors.issueTitle && (
-                <p className="text-[12px] leading-4 text-[#E5484D]" role="alert">
-                  {errors.issueTitle}
-                </p>
-              )}
-            </div>
-
-            <div className="mb-3 flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <label htmlFor="issue-desc" className="text-[13px] font-medium leading-[18px] text-[#ECEEF0]">
-                  Detailed reproduction &amp; acceptance criteria
-                </label>
-                <div className="flex items-center gap-1.5 font-mono text-[11px] leading-[14px] text-[#8A8F98]">
-                  <span className="text-[#5E626E]">•</span>
-                  <span className="text-[#5E626E]">{imported ? "Original GitHub Markdown" : "Markdown enabled"}</span>
-                </div>
-              </div>
-              <textarea
-                id="issue-desc"
-                rows={6}
-                value={issueBody}
-                onChange={(e) => setIssueBody(e.target.value)}
-                aria-invalid={Boolean(errors.issueBody)}
-                placeholder={
-                  "Bug: a 10% discount on a 200 item charges 190 instead of 180.\n\nExpected: applyDiscount(200, 10) === 180.\nAcceptance: existing test suite passes with regression coverage."
-                }
-                className={`w-full resize-y rounded-md border bg-[#141518] p-3 font-mono text-[12px] leading-relaxed text-[#ECEEF0] transition-colors placeholder:text-[#5E626E] focus:outline-none focus:ring-1 focus:ring-[#5E6AD2] ${
-                  errors.issueBody ? "border-[#E5484D]" : "border-[#2E3038] focus:border-[#5E6AD2]"
-                }`}
-              />
-              {errors.issueBody ? (
-                <p className="text-[12px] leading-4 text-[#E5484D]" role="alert">
-                  {errors.issueBody}
-                </p>
-              ) : (
-                <span className="mt-0.5 text-[12px] leading-4 text-[#5E626E]">
-                  {imported && !importedDirty
-                    ? "Imported verbatim from GitHub. Editing keeps the source link and enables “Restore from GitHub”."
-                    : "State the failure mechanism, expected behavior, and verification boundary. Deterministic patch generation depends on precise invariants."}
-                </span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 gap-2 rounded-lg border border-[#26282E] bg-[#141518] p-2 pt-2 md:grid-cols-2">
-              <div className="flex flex-col gap-1">
-                <label htmlFor="issue-ref" className="text-[12px] leading-4 text-[#8A8F98]">
-                  Issue tracking reference (Optional)
-                </label>
-                <div className="relative flex items-center">
-                  <span className="pointer-events-none absolute left-2.5 font-mono text-[12px] leading-[18px] text-[#5E626E]">#</span>
-                  <input
-                    id="issue-ref"
-                    value={issueNumber}
-                    onChange={(e) => setIssueNumber(e.target.value)}
-                    inputMode="numeric"
-                    placeholder="e.g. 142 or JIRA-899"
-                    readOnly={Boolean(imported)}
-                    title={imported ? `Imported from GitHub issue #${imported.issue.number}` : undefined}
-                    aria-invalid={Boolean(errors.issueNumber)}
-                    className={`h-7 w-full rounded-md border border-[#2E3038] bg-[#1A1B20] pl-6 pr-3 font-mono text-[12px] leading-[18px] text-[#ECEEF0] transition-colors placeholder:text-[#5E626E] focus:border-[#5E6AD2] focus:outline-none ${imported ? "opacity-70" : ""}`}
+                <div className="mb-3 flex flex-col gap-1">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="issue-desc" className="text-[13px] font-medium leading-[18px] text-[#ECEEF0]">
+                      Detailed reproduction &amp; acceptance criteria
+                    </label>
+                    <div className="flex items-center gap-1.5 font-mono text-[11px] leading-[14px] text-[#8A8F98]">
+                      <span className="text-[#5E626E]">•</span>
+                      <span className="text-[#5E626E]">{imported ? "Original GitHub Markdown" : "Markdown enabled"}</span>
+                    </div>
+                  </div>
+                  <textarea
+                    id="issue-desc"
+                    rows={6}
+                    value={issueBody}
+                    onChange={(e) => setIssueBody(e.target.value)}
+                    aria-invalid={Boolean(errors.issueBody)}
+                    placeholder={
+                      "Bug: a 10% discount on a 200 item charges 190 instead of 180.\n\nExpected: applyDiscount(200, 10) === 180.\nAcceptance: existing test suite passes with regression coverage."
+                    }
+                    className={`w-full resize-y rounded-md border bg-[#141518] p-3 font-mono text-[12px] leading-relaxed text-[#ECEEF0] transition-colors placeholder:text-[#5E626E] focus:outline-none focus:ring-1 focus:ring-[#5E6AD2] ${
+                      errors.issueBody ? "border-[#E5484D]" : "border-[#2E3038] focus:border-[#5E6AD2]"
+                    }`}
                   />
+                  {errors.issueBody ? (
+                    <p className="text-[12px] leading-4 text-[#E5484D]" role="alert">
+                      {errors.issueBody}
+                    </p>
+                  ) : (
+                    <span className="mt-0.5 text-[12px] leading-4 text-[#5E626E]">
+                      {imported && !importedDirty
+                        ? "Imported verbatim from GitHub. Editing keeps the source link and enables “Restore from GitHub”."
+                        : "State the failure mechanism, expected behavior, and verification boundary. Deterministic patch generation depends on precise invariants."}
+                    </span>
+                  )}
                 </div>
-                {errors.issueNumber && (
-                  <p className="text-[11px] leading-4 text-[#E5484D]" role="alert">
-                    {errors.issueNumber}
-                  </p>
-                )}
-                {imported && (
-                  <p className="text-[10px] leading-[14px] text-[#5E626E]">
-                    Linked to <a href={imported.issue.htmlUrl} target="_blank" rel="noreferrer" className="text-[#BDC2FF] hover:underline">{imported.issue.repositoryFullName}#{imported.issue.number}</a>
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-col gap-1">
-                <label htmlFor="test-scope" className="text-[12px] leading-4 text-[#8A8F98]">
-                  Targeted verification runner
-                </label>
-                <select
-                  id="test-scope"
-                  disabled
-                  title="Verification uses the repository's detected test runner for every run."
-                  className="h-7 w-full cursor-not-allowed rounded-md border border-[#2E3038] bg-[#1A1B20] px-2 font-mono text-[12px] leading-[18px] text-[#ECEEF0] focus:border-[#5E6AD2] focus:outline-none"
-                >
-                  <option>Auto-detect (repository test runner)</option>
-                </select>
-              </div>
-            </div>
-          </section>
 
-          {/* 03 / Execution action bar */}
-          <section
-            className="flex flex-col items-stretch justify-between gap-2 rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm sm:flex-row sm:items-center"
-            aria-label="Start analysis"
-          >
-            <div className="flex items-center gap-1.5 text-[#8A8F98]">
-              <Icon name="timelapse" size={16} className="text-[#5E6AD2]" />
-              <span className="text-[12px] leading-4">
-                Est. execution time: <span className="font-mono text-[#ECEEF0]">{estimate ?? "no baseline yet"}</span>
-                {estimate ? " to deterministic patch." : "."}
-              </span>
-            </div>
-            <div className="flex items-center justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={saveDraft}
-                className="flex h-8 items-center gap-1.5 rounded-md border border-[#2E3038] bg-[#222329] px-3 text-[13px] font-medium text-[#8A8F98] transition-colors hover:border-[#424652] hover:bg-[#282A31] hover:text-[#ECEEF0]"
-              >
-                <Icon name={draftSaved ? "check" : "save"} size={14} />
-                <span>{draftSaved ? "Draft saved" : "Save Draft"}</span>
-              </button>
-              <button
-                type="submit"
-                disabled={submitDisabled}
-                title={blockers.length > 0 ? blockers.join("\n") : undefined}
-                className="flex h-8 items-center gap-1.5 rounded-md bg-[#5E6AD2] px-3 text-[13px] font-medium text-white shadow-sm shadow-[#5E6AD2]/25 transition-all hover:bg-[#6875E3] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#282A31] disabled:text-[#5E626E] disabled:shadow-none"
-              >
-                <Icon name={submitting ? "sync" : "play_arrow"} size={16} className={submitting ? "animate-spin" : ""} />
-                <span>{submitting ? "Validating..." : "Start Analysis"}</span>
-                <kbd className="rounded border border-white/20 bg-black/20 px-1 py-0.5 font-mono text-[10px] font-medium leading-[14px] text-white">↵</kbd>
-              </button>
-            </div>
-          </section>
+                <div className="grid grid-cols-1 gap-2 rounded-lg border border-[#26282E] bg-[#141518] p-2 pt-2 md:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="issue-ref" className="text-[12px] leading-4 text-[#8A8F98]">
+                      Issue tracking reference (Optional)
+                    </label>
+                    <div className="relative flex items-center">
+                      <span className="pointer-events-none absolute left-2.5 font-mono text-[12px] leading-[18px] text-[#5E626E]">#</span>
+                      <input
+                        id="issue-ref"
+                        value={issueNumber}
+                        onChange={(e) => setIssueNumber(e.target.value)}
+                        inputMode="numeric"
+                        placeholder="e.g. 142 or JIRA-899"
+                        readOnly={Boolean(imported)}
+                        title={imported ? `Imported from GitHub issue #${imported.issue.number}` : undefined}
+                        aria-invalid={Boolean(errors.issueNumber)}
+                        className={`h-7 w-full rounded-md border border-[#2E3038] bg-[#1A1B20] pl-6 pr-3 font-mono text-[12px] leading-[18px] text-[#ECEEF0] transition-colors placeholder:text-[#5E626E] focus:border-[#5E6AD2] focus:outline-none ${imported ? "opacity-70" : ""}`}
+                      />
+                    </div>
+                    {errors.issueNumber && (
+                      <p className="text-[11px] leading-4 text-[#E5484D]" role="alert">
+                        {errors.issueNumber}
+                      </p>
+                    )}
+                    {imported && (
+                      <p className="text-[10px] leading-[14px] text-[#5E626E]">
+                        Linked to <a href={imported.issue.htmlUrl} target="_blank" rel="noreferrer" className="text-[#BDC2FF] hover:underline">{imported.issue.repositoryFullName}#{imported.issue.number}</a>
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor="test-scope" className="text-[12px] leading-4 text-[#8A8F98]">
+                      Targeted verification runner
+                    </label>
+                    <select
+                      id="test-scope"
+                      disabled
+                      title="Verification uses the repository's detected test runner for every run."
+                      className="h-7 w-full cursor-not-allowed rounded-md border border-[#2E3038] bg-[#1A1B20] px-2 font-mono text-[12px] leading-[18px] text-[#ECEEF0] focus:border-[#5E6AD2] focus:outline-none"
+                    >
+                      <option>Auto-detect (repository test runner)</option>
+                    </select>
+                  </div>
+                </div>
+              </section>
 
-          {blockers.length > 0 && (
-            <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-              Analysis is blocked by {blockers.length} required action{blockers.length > 1 ? "s" : ""}. Review System Readiness to resolve{" "}
-              {blockers.length > 1 ? "them" : "it"}.
-            </p>
-          )}
-          {serverError && (
-            <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-              The API rejected this submission: {serverError}. Your input has been preserved — fix the problem and try again.
-            </p>
+              {/* 03 / Execution action bar */}
+              <section
+                className="flex flex-col items-stretch justify-between gap-2 rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm sm:flex-row sm:items-center"
+                aria-label="Start analysis"
+              >
+                <div className="flex items-center gap-1.5 text-[#8A8F98]">
+                  <Icon name="timelapse" size={16} className="text-[#5E6AD2]" />
+                  <span className="text-[12px] leading-4">
+                    Est. execution time: <span className="font-mono text-[#ECEEF0]">{estimate ?? "no baseline yet"}</span>
+                    {estimate ? " to deterministic patch." : "."}
+                  </span>
+                </div>
+                <div className="flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={saveDraft}
+                    className="flex h-8 items-center gap-1.5 rounded-md border border-[#2E3038] bg-[#222329] px-3 text-[13px] font-medium text-[#8A8F98] transition-colors hover:border-[#424652] hover:bg-[#282A31] hover:text-[#ECEEF0]"
+                  >
+                    <Icon name={draftSaved ? "check" : "save"} size={14} />
+                    <span>{draftSaved ? "Draft saved" : "Save Draft"}</span>
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitDisabled}
+                    title={blockers.length > 0 ? blockers.join("\n") : undefined}
+                    className="flex h-8 items-center gap-1.5 rounded-md bg-[#5E6AD2] px-3 text-[13px] font-medium text-white shadow-sm shadow-[#5E6AD2]/25 transition-all hover:bg-[#6875E3] active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#282A31] disabled:text-[#5E626E] disabled:shadow-none"
+                  >
+                    <Icon name={submitting ? "sync" : "play_arrow"} size={16} className={submitting ? "animate-spin" : ""} />
+                    <span>{submitting ? "Validating..." : "Start Analysis"}</span>
+                    <kbd className="rounded border border-white/20 bg-black/20 px-1 py-0.5 font-mono text-[10px] font-medium leading-[14px] text-white">↵</kbd>
+                  </button>
+                </div>
+              </section>
+
+              {blockers.length > 0 && (
+                <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
+                  Analysis is blocked by {blockers.length} required action{blockers.length > 1 ? "s" : ""}. Review System Readiness to resolve{" "}
+                  {blockers.length > 1 ? "them" : "it"}.
+                </p>
+              )}
+              {serverError && (
+                <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
+                  The API rejected this submission: {serverError}. Your input has been preserved — fix the problem and try again.
+                </p>
+              )}
+            </>
           )}
         </form>
 

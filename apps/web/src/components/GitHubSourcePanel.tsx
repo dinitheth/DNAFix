@@ -163,12 +163,14 @@ export interface GitHubSourcePanelProps {
   selectedIssueNumber: number | null;
   /** Reveal the connected panel immediately, e.g. after returning from GitHub OAuth. */
   autoOpenGitHub?: boolean;
+  /** Reports whether the user has moved past the sign-in / manual-entry choice. */
+  onChoiceChange?: (chosen: boolean) => void;
 }
 
 type GitHubPanelView = "choose" | "github" | "manual";
 
 export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
-  const { status, statusLoading, statusError, onRefreshStatus, repositoryPath, onRepositoryPathChange, selectedRepository, onIssueLoaded, selectedIssueNumber, autoOpenGitHub } = props;
+  const { status, statusLoading, statusError, onRefreshStatus, repositoryPath, onRepositoryPathChange, selectedRepository, onIssueLoaded, selectedIssueNumber, autoOpenGitHub, onChoiceChange } = props;
   const [view, setView] = useState<GitHubPanelView>(() => (autoOpenGitHub || selectedRepository ? "github" : "choose"));
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -210,6 +212,10 @@ export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
   }, [selectedRepository?.fullName]);
 
   useEffect(() => () => issueController.current?.abort(), []);
+
+  useEffect(() => {
+    onChoiceChange?.(view !== "choose");
+  }, [view, onChoiceChange]);
 
   useEffect(() => {
     setIssuePage(1);
