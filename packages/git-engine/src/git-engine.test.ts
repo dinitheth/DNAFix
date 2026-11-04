@@ -100,11 +100,12 @@ describe("GitWorktreeManager", () => {
     await expect(manager.resetToCommit(notARepo, base)).rejects.toThrow(/not a DNAFix-managed worktree/);
   });
 
-  it("rejects path traversal and worktree removal with active tasks", async () => {
+  it("rejects path traversal in every entry point that touches the filesystem", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "dnafix-git-"));
     await expect(resolveInside(root, "../escape")).rejects.toThrow(/escapes/);
     const manager = new GitWorktreeManager(root);
-    await expect(manager.removeWorktree(root, root, { hasActiveTask: true })).rejects.toThrow(/active task/);
     await expect(manager.createWorktree(root, "../evil", "t", "abc1234")).rejects.toThrow(/Invalid run id/);
+    // The sweep is the one that deletes, so its id is validated before any listing.
+    await expect(manager.removeRunWorktrees(root, "../evil")).rejects.toThrow(/Invalid run id/);
   });
 });

@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { GitWorktreeManager } from "@dnafix/git-engine";
 import { SqliteStore, type RunRecord } from "@dnafix/persistence";
 import type { VerificationWaiver } from "@dnafix/contracts";
 import { RunConflictError, RunService, type PipelineDeps } from "./index.js";
@@ -25,7 +26,14 @@ async function pair(): Promise<{ db: string; api: RunService; worker: RunService
   const make = () => {
     const store = new SqliteStore(db, { skipIntegrityCheck: true });
     stores.push(store);
-    const deps = { store, dataRoot: dir, model: { name: "test", modelId: "test-model" } } as unknown as PipelineDeps;
+    const deps = {
+      store,
+      dataRoot: dir,
+      model: { name: "test", modelId: "test-model" },
+      // Cancellation now reclaims the run's worktrees, so the double needs the real
+      // manager over a directory that simply never gets anything written to it.
+      worktrees: new GitWorktreeManager(path.join(dir, "worktrees")),
+    } as unknown as PipelineDeps;
     return new RunService(deps);
   };
   return { db, api: make(), worker: make() };

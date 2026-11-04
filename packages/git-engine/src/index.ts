@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat, mkdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -60,11 +60,23 @@ export async function resolveInside(root: string, candidate: string): Promise<st
   return absolute;
 }
 
+async function exists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface WorktreeInfo {
   path: string;
   branch: string;
   baseCommitSha: string;
 }
+
+/** A worktree DNAFix created itself: `<run>--<task>`, directly under the worktree root. */
+const MANAGED_WORKTREE_DIR = /^[a-zA-Z0-9][a-zA-Z0-9-_]*--[a-zA-Z0-9][a-zA-Z0-9-_]*$/;
 
 export class GitWorktreeManager {
   constructor(private readonly worktreeRoot: string) {}
@@ -141,7 +153,7 @@ export class GitWorktreeManager {
     if (!/^[0-9a-f]{7,64}$/i.test(baseCommitSha)) throw new GitError(`Invalid base commit: ${baseCommitSha}`);
     const root = path.resolve(this.worktreeRoot);
     const resolved = path.resolve(worktreePath);
-    if (path.dirname(resolved) !== root || !/^[a-zA-Z0-9][a-zA-Z0-9-_]*--[a-zA-Z0-9][a-zA-Z0-9-_]*$/.test(path.basename(resolved))) {
+    if (path.dirname(resolved) !== root || !MANAGED_WORKTREE_DIR.test(path.basename(resolved))) {
       throw new GitError(`Refusing to reset a path that is not a DNAFix-managed worktree: ${worktreePath}`);
     }
     await git(worktreePath, ["reset", "--hard", baseCommitSha]);
@@ -248,11 +260,34 @@ export class GitWorktreeManager {
     );
   }
 
-  async removeWorktree(repoPath: string, worktreePath: string, opts: { force?: boolean; hasActiveTask?: boolean } = {}): Promise<void> {
-    if (opts.hasActiveTask) throw new GitError("Refusing to delete a worktree with an active task");
-    const args = ["worktree", "remove", worktreePath];
-    if (opts.force) args.push("--force");
-    await git(repoPath, args);
+  /**
+   * Delete every worktree directory this run created, then prune the registry.
+   * Paths come from the managed directory listing, never from a caller, and each has
+   * to be a direct child of the worktree root named `<run>--<task>` — the containment
+   * `resetToCommit` enforces, which matters more here because this one deletes.
+   * `--force` is deliberate: a run that FAILED has a dirty tree by definition.
+   * The `dnafix/<run>/<task>` branches are left alone on purpose; they are what keeps
+   * the task commits reachable after the directories go, and the run record cites them.
+   */
+  async removeRunWorktrees(repoPath: string, runId: string): Promise<string[]> {
+    assertValidId(runId, "run");
+    const names = await readdir(this.worktreeRoot).catch(() => [] as string[]);
+    const removed: string[] = [];
+    for (const name of names) {
+      if (!name.startsWith(`${runId}--`) || !MANAGED_WORKTREE_DIR.test(name)) continue;
+      const target = await resolveInside(this.worktreeRoot, name);
+      try {
+        await git(repoPath, ["worktree", "remove", "--force", target]);
+      } catch {
+        // Already unregistered — a crash that took the directory with it. The path is
+        // validated above, so removing what is left is still a contained operation.
+        if (!(await exists(target))) continue;
+        await rm(target, { recursive: true, force: true });
+      }
+      removed.push(target);
+    }
+    if (removed.length > 0) await git(repoPath, ["worktree", "prune"]).catch(() => undefined);
+    return removed;
   }
 
   async listWorktrees(repoPath: string): Promise<string[]> {

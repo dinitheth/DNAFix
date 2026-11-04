@@ -268,6 +268,14 @@ export class RunService {
    * so the decision is never lost to whichever process happened to write last.
    */
   async cancel(runId: string): Promise<RunRecord | null> {
+    const cancelled = await this.markCancelled(runId);
+    // Cleanup belongs to the decision to stop, not to the driver that happened to be
+    // working the run: cancelled while parked, no finally block is left to reclaim it.
+    await this.cleanWorkspace(runId);
+    return cancelled;
+  }
+
+  private async markCancelled(runId: string): Promise<RunRecord | null> {
     for (let attempt = 1; ; attempt++) {
       const run = await this.load(runId);
       if (!run) return null;
@@ -285,6 +293,36 @@ export class RunService {
         await sleep(2 * attempt + Math.floor(Math.random() * 5));
       }
     }
+  }
+
+  /**
+   * Reclaim the scratch a stopped run left behind. Its diff, task commits and
+   * verification results are all in the record, so the worktrees under
+   * `<dataRoot>/worktrees` are the only thing left to take back — and leaving them is
+   * not harmless, because a re-driven phase would reuse a directory pinned to a base
+   * commit that no longer matches. BLOCKED, the approval waits and every in-flight
+   * state keep theirs; those runs are still going to work.
+   *
+   * Never writes to the run: the store rejects writes to a terminal row, and the audit
+   * event is the record of what was deleted.
+   */
+  async cleanWorkspace(runId: string): Promise<string[]> {
+    const run = await this.deps.store.getRun(runId);
+    if (!run || !TERMINAL_STATES.includes(run.state)) return [];
+    // A driver in another process still holds a live lease and deletes on its way out;
+    // taking the directory from under it would only make the phase it is in fail.
+    if (run.lease && run.lease.owner !== this.ownerId && Date.parse(run.lease.expiresAt) > Date.now()) return [];
+    let removed: string[];
+    try {
+      removed = await this.deps.worktrees.removeRunWorktrees(run.repositoryPath, run.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.audit(run.id, run.repositoryId, "system", "workspace.cleanup-failed", "error", message.slice(0, 1_000));
+      return [];
+    }
+    if (removed.length === 0) return removed;
+    await this.audit(run.id, run.repositoryId, "system", "workspace.removed", "info", `${removed.length} worktree(s) removed: ${removed.join(", ")}`.slice(0, 1_000));
+    return removed;
   }
 
   /** Returns null when the merge is safe, otherwise a message naming the conflict. */
@@ -978,6 +1016,9 @@ export class Pipeline {
       else if (!blocked && fresh.state !== "FAILED") await this.runs.transition(fresh, "FAILED").catch(() => undefined);
     } finally {
       this.deps.mcp?.releaseRun(runId);
+      // The driver is done with the run either way — delivered, failed, cancelled out
+      // from under it — so this is where its scratch directories are taken back.
+      await this.runs.cleanWorkspace(runId);
     }
   }
 }
