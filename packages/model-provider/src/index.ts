@@ -785,9 +785,11 @@ export class ScriptedModelProvider implements ModelProvider {
   }
   async reviewVerification(input: ReviewInput): Promise<VerifierReview> {
     if (this.handlers.review) return VerifierReviewSchema.parse(this.handlers.review(input));
+    const executed = input.checks.filter((c) => c.result !== null && c.status !== "not-executed");
+    const verdict = executed.length === 0 ? "uncertain" : executed.every((c) => c.status === "passed") ? "approve" : "request-changes";
     return {
-      summary: "Scripted verifier: deterministic checks are authoritative; no model review performed.",
-      verdict: input.checks.every((c) => c.status === "passed" || c.status === "not-executed" || c.status === "pre-existing-failure") ? "approve" : "request-changes",
+      summary: `Scripted verifier: ${executed.length} executed check(s), verdict ${verdict}. Deterministic checks remain authoritative; no model review performed.`,
+      verdict,
       criteria: input.acceptanceCriteria.map((criterion) => ({ criterion, status: "uncertain" as const, evidence: "Scripted test double did not evaluate this criterion." })),
       unintendedChanges: [],
       missingTests: [],

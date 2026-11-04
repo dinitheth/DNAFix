@@ -194,6 +194,20 @@ export const VerificationCheckSchema = z.object({
 });
 export type VerificationCheck = z.infer<typeof VerificationCheckSchema>;
 
+/**
+ * An explicit human decision to accept a check that failed before DNAFix
+ * changed anything. Required evidence, because a pre-existing failure must
+ * never be silently counted as a pass.
+ */
+export const VerificationWaiverSchema = z.object({
+  checkId: z.string().min(1),
+  reason: z.string().min(20),
+  evidence: z.string().min(20),
+  waivedBy: z.string().min(1),
+  waivedAt: z.string().min(1),
+});
+export type VerificationWaiver = z.infer<typeof VerificationWaiverSchema>;
+
 export const CreateRunRequestSchema = z.object({
   repositoryPath: z.string().min(1).optional(),
   githubOwner: z.string().min(1).optional(),

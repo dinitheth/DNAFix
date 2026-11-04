@@ -465,7 +465,7 @@ export function RunDetail() {
                   <li key={c.kind} className="border-b border-[#26282E]/60 py-1.5 text-[12px] last:border-0">
                     <div className="flex items-center gap-2">
                       <span className="capitalize leading-[18px] text-[#ECEEF0]">{c.kind}</span>
-                      <StatusPill tone={c.status === "passed" ? "success" : c.status === "failed" ? "danger" : "neutral"}>{c.status}</StatusPill>
+                      <StatusPill tone={c.status === "passed" ? "success" : c.status === "failed" ? "danger" : c.status === "pre-existing-failure" || c.status === "blocked" ? "warning" : "neutral"}>{c.status}</StatusPill>
                     </div>
                     {c.result && (
                       <p className="mt-0.5 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]" title={`${c.result.argv.join(" ")} · exit ${c.result.exitCode ?? "—"}`}>

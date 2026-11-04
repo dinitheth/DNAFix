@@ -11,7 +11,7 @@ import { McpConnectorService } from "@dnafix/mcp";
 import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
 import { FileStore, type RunRecord, type Store } from "@dnafix/persistence";
 import { ProjectDNAAdapter, RepositoryIntelligenceError, type RepositoryIntelligence } from "@dnafix/repository-intelligence";
-import { checksPassed, compareImpact, discoverChecks, runChecks } from "@dnafix/verification";
+import { compareImpact, discoverChecks, evaluateVerification, runChecks } from "@dnafix/verification";
 import { codeBuildProviderFromEnv, type RemoteExecutionProvider } from "@dnafix/remote-execution";
 import { CodingAgent, VerificationAgent, readScopedFiles } from "@dnafix/agent-orchestrator";
 
@@ -514,8 +514,37 @@ export class Pipeline {
             "ok",
             `checks=${run.verificationChecks.map((c) => `${c.kind}:${c.status}`).join(",")} unexpected=${comparison.unexpected.join(",") || "none"} verdict=${run.verifierReview.verdict} sandbox=${this.deps.sandboxNote}`,
           );
-          const ok = checksPassed(run.verificationChecks) && run.verifierReview.verdict !== "request-changes";
-          if (ok) break;
+          const evaluation = evaluateVerification(run.verificationChecks, {
+            baselineFailingIds: baselineFailing,
+            waivers: run.verificationWaivers,
+          });
+          const review = run.verifierReview;
+          await this.runs.audit(
+            run.id,
+            run.repositoryId,
+            "verification-agent",
+            "verification.completed",
+            evaluation.ok && review?.verdict === "approve" ? "ok" : "info",
+            `checks=${run.verificationChecks.map((c) => `${c.kind}:${c.status}`).join(",")} unexpected=${comparison.unexpected.join(",") || "none"} verdict=${review?.verdict ?? "missing"} evidence=${evaluation.regressionEvidence ? "baseline-failure-fixed" : "none"} repairable=${evaluation.repairable.length} needsHuman=${evaluation.needsHuman.length} sandbox=${this.deps.sandboxNote}`,
+          );
+          // Missing evidence is not repairable by an agent: it needs a waiver,
+          // a test, or a human decision. Report the gap before the verdict so
+          // the operator sees the root cause rather than the symptom.
+          if (evaluation.needsHuman.length > 0) {
+            run.error = `Verification evidence is incomplete: ${evaluation.needsHuman.join(" ")}${review ? ` Verifier: ${review.summary}` : ""}`;
+            await this.runs.save(run);
+            run = await this.runs.transition(run, "BLOCKED");
+            return;
+          }
+          // An inconclusive or missing review is a human decision: repairing
+          // cannot turn "we do not know" into evidence.
+          if (!review || review.verdict === "uncertain") {
+            run.error = `Verification requires human review: verifier verdict was ${review?.verdict ?? "missing"}. ${review?.summary ?? ""}`.trim();
+            await this.runs.save(run);
+            run = await this.runs.transition(run, "BLOCKED");
+            return;
+          }
+          if (evaluation.ok && review.verdict === "approve") break;
           if (run.repairAttempts >= this.deps.maxRepairAttempts) {
             run.error = `Verification failed after ${run.repairAttempts} repair attempt(s). Checks: ${run.verificationChecks.map((c) => `${c.kind}:${c.status}`).join(", ")}; verifier: ${run.verifierReview.summary}`;
             await this.runs.save(run);

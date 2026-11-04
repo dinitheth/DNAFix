@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { VerificationCheck } from "@dnafix/contracts";
+import type { VerificationCheck, VerificationWaiver } from "@dnafix/contracts";
 import type { CommandRunner } from "@dnafix/execution";
 
 export type CheckKind = VerificationCheck["kind"];
@@ -83,6 +83,53 @@ export function compareImpact(predicted: readonly string[], actualChanged: reado
   };
 }
 
-export function checksPassed(checks: readonly VerificationCheck[]): boolean {
-  return checks.every((c) => c.status === "passed" || c.status === "skipped" || c.status === "not-executed" || c.status === "pre-existing-failure");
+/**
+ * Decide whether the executed evidence genuinely supports declaring a run
+ * verified.
+ *
+ * Only a check that actually ran and passed counts. A check that never
+ * executed, never produced an exit code, or was already failing at baseline
+ * is never silently treated as a pass — a coding agent must not be able to
+ * manufacture verification success by producing no evidence.
+ */
+export interface VerificationEvaluation {
+  ok: boolean;
+  /** Executed checks that failed. The agent may be able to repair these. */
+  repairable: string[];
+  /** Evidence gaps only a human can resolve. */
+  needsHuman: string[];
+  /** Recorded for the review packet; does not influence the decision. */
+  notes: string[];
+  /** True when a check that failed at baseline now passes. */
+  regressionEvidence: boolean;
+}
+
+export function evaluateVerification(
+  checks: readonly VerificationCheck[],
+  opts: { baselineFailingIds?: ReadonlySet<string>; waivers?: readonly VerificationWaiver[] } = {},
+): VerificationEvaluation {
+  const repairable: string[] = [];
+  const needsHuman: string[] = [];
+  const notes: string[] = [];
+  const waived = new Set((opts.waivers ?? []).map((w) => w.checkId));
+  const executed = checks.filter((c) => c.result !== null && (c.status === "passed" || c.status === "failed" || c.status === "pre-existing-failure"));
+
+  for (const check of checks) {
+    if (check.status === "failed") repairable.push(`${check.id} failed (exit ${check.result?.exitCode ?? "unknown"}).`);
+    else if (check.status === "blocked") needsHuman.push(`${check.id} produced no exit code, so it is not evidence either way.`);
+    else if (check.status === "pre-existing-failure") {
+      if (waived.has(check.id)) notes.push(`${check.id} was already failing at baseline and is covered by a human waiver.`);
+      else needsHuman.push(`${check.id} was already failing at baseline and still fails. Exclude it with an evidence-backed waiver or fix it.`);
+    } else if (check.status === "not-executed") notes.push(`${check.id} has no runnable script, so it contributes no evidence.`);
+    else if (check.status === "skipped") notes.push(`${check.id} was skipped, so it contributes no evidence.`);
+  }
+
+  if (executed.length === 0) needsHuman.push("No verification check executed, so there is no evidence that the change works.");
+
+  const regressionEvidence = executed.some((c) => c.status === "passed" && (opts.baselineFailingIds?.has(c.id) ?? false));
+  if (opts.baselineFailingIds && opts.baselineFailingIds.size > 0 && !regressionEvidence) {
+    notes.push("No check that failed at baseline now passes, so the reported defect is not demonstrated as fixed.");
+  }
+
+  return { ok: repairable.length === 0 && needsHuman.length === 0, repairable, needsHuman, notes, regressionEvidence };
 }

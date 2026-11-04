@@ -12,6 +12,7 @@ import type {
   McpToolPermissionRecord,
   RepositoryIntelligenceReport,
   VerificationCheck,
+  VerificationWaiver,
   VerifierReview,
   WorkflowState,
 } from "@dnafix/contracts";
@@ -116,6 +117,8 @@ export interface RunRecord {
   verificationChecks: VerificationCheck[] | null;
   remoteExecutions?: RemoteExecutionRecord[];
   verifierReview: VerifierReview | null;
+  /** Human-approved exclusions for checks that were already failing at baseline. */
+  verificationWaivers?: VerificationWaiver[];
   diff: string;
   changedPaths: string[];
   repairAttempts: number;

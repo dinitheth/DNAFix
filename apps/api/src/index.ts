@@ -8,6 +8,7 @@ import { CreateRunRequestSchema } from "@dnafix/contracts";
 import { GitHubError, GitHubIntegrationService, GitHubNotConfiguredError, verifyWebhookSignature } from "@dnafix/github";
 import { GitHubConnectionManager, readGitHubSessionId, registerGitHubRoutes } from "./github.js";
 import { registerMcpRoutes } from "./mcp.js";
+import { evaluateVerification } from "@dnafix/verification";
 
 const deps = createDefaultDeps();
 const runs = new RunService(deps);
@@ -232,7 +233,44 @@ app.get("/api/v1/runs/:id/diff", async (req, reply) => {
 app.get("/api/v1/runs/:id/verification", async (req, reply) => {
   const run = await loadRun((req.params as { id: string }).id, reply);
   if (!run) return;
-  return { baselineChecks: run.baselineChecks, verificationChecks: run.verificationChecks, verifierReview: run.verifierReview, repairAttempts: run.repairAttempts };
+  return {
+    baselineChecks: run.baselineChecks,
+    verificationChecks: run.verificationChecks,
+    verifierReview: run.verifierReview,
+    repairAttempts: run.repairAttempts,
+    waivers: run.verificationWaivers ?? [],
+    evaluation: evaluateVerification(run.verificationChecks ?? [], {
+      baselineFailingIds: new Set(run.baselineChecks.filter((c) => c.status === "failed").map((c) => c.id)),
+      waivers: run.verificationWaivers ?? [],
+    }),
+  };
+});
+
+/**
+ * Exclude a check that was already failing at baseline. Deliberately requires
+ * a reason and evidence: without it, "pre-existing failure" would be a silent
+ * way to make a run look verified.
+ */
+const WaiverSchema = z.object({ checkId: z.string().min(1), reason: z.string().min(20).max(2_000), evidence: z.string().min(20).max(4_000), waivedBy: z.string().min(1).max(200).default("user") });
+app.post("/api/v1/runs/:id/verification-waivers", async (req, reply) => {
+  const run = await loadRun((req.params as { id: string }).id, reply);
+  if (!run) return;
+  const parsed = WaiverSchema.safeParse(req.body);
+  if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues });
+  const failing = (run.verificationChecks ?? []).filter((c) => c.status === "pre-existing-failure").map((c) => c.id);
+  if (!failing.includes(parsed.data.checkId)) {
+    return reply.code(422).send({ error: `${parsed.data.checkId} is not a pre-existing failure on this run. Waivable checks: ${failing.join(", ") || "none"}`, code: "not_waivable" });
+  }
+  if ((run.verificationWaivers ?? []).some((w) => w.checkId === parsed.data.checkId)) {
+    return reply.code(409).send({ error: `${parsed.data.checkId} is already waived.`, code: "already_waived" });
+  }
+  run.verificationWaivers = [
+    ...(run.verificationWaivers ?? []),
+    { ...parsed.data, waivedAt: new Date().toISOString() },
+  ];
+  await runs.save(run);
+  await runs.audit(run.id, run.repositoryId, "user", "verification.waived", "ok", `check=${parsed.data.checkId} by=${parsed.data.waivedBy} reason=${parsed.data.reason.slice(0, 300)}`);
+  return { waivers: run.verificationWaivers };
 });
 
 /** Operator view of cloud executions incl. role quarantine/containment state and unresolved cleanups. */
