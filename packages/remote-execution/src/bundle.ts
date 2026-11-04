@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { writeZipArchive, type ZipEntry } from "./zip.js";
 
 /**
  * Source bundle packaging for cloud execution.
@@ -36,16 +36,6 @@ export function s3KeysForRun(runId: string): { sourceKey: string; manifestKey: s
   };
 }
 
-function runTar(args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("tar", args, { shell: false, windowsHide: true });
-    let err = "";
-    child.stderr.on("data", (b: Buffer) => (err += b.toString("utf8")));
-    child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`tar ${args.join(" ")} exited ${code}: ${err.slice(0, 400)}`))));
-  });
-}
-
 async function sha256File(file: string): Promise<string> {
   const hash = createHash("sha256");
   await new Promise<void>((resolve, reject) => {
@@ -70,20 +60,27 @@ export async function createSourceBundle(workspacePath: string, gitRunner: (args
     .map((s) => s.trim().replaceAll("\\", "/"))
     .filter(Boolean)
     .sort();
-  // Drop directory entries (including git submodule gitlinks): tar would
-  // otherwise recursively swallow nested repositories and their node_modules.
-  const { stat } = await import("node:fs/promises");
+  // Only real files are packaged. Directories (including git submodule
+  // gitlinks) would otherwise recurse into nested repositories, and symlinks
+  // are stored as links rather than followed so a link outside the repository
+  // cannot leak its target into a bundle.
+  const entries: ZipEntry[] = [];
   const files: string[] = [];
   for (const f of listed.filter((entry) => !isExcludedFromBundle(entry))) {
-    const info = await stat(path.join(workspacePath, f)).catch(() => null);
-    if (info?.isFile()) files.push(f);
+    const info = await lstat(path.join(workspacePath, f)).catch(() => null);
+    if (!info) continue;
+    if (info.isSymbolicLink()) {
+      entries.push({ path: f, data: Buffer.from(await readlink(path.join(workspacePath, f)), "utf8"), mode: info.mode & 0o777, symlink: true });
+      files.push(f);
+    } else if (info.isFile()) {
+      entries.push({ path: f, data: await readFile(path.join(workspacePath, f)), mode: info.mode & 0o777 });
+      files.push(f);
+    }
   }
   if (files.length === 0) throw new Error(`Source bundle for ${workspacePath} would be empty after exclusions`);
   const staging = await mkdtemp(path.join(tmpdir(), "dnafix-bundle-"));
-  const listPath = path.join(staging, "files.txt");
   const zipPath = path.join(staging, "source.zip");
-  await writeFile(listPath, files.join("\n"), "utf8");
-  await runTar(["-a", "-cf", zipPath, "-C", workspacePath, "-T", listPath]);
+  await writeZipArchive(zipPath, entries);
   const sha256 = await sha256File(zipPath);
-  return { zipPath, files, sha256, bytes: (await stat(zipPath)).size };
+  return { zipPath, files, sha256, bytes: (await lstat(zipPath)).size };
 }
