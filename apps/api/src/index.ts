@@ -64,34 +64,64 @@ function kick(runId: string): void {
 
 app.get("/health", async () => ({ status: "ok", service: "dnafix-api", time: new Date().toISOString() }));
 
-app.get("/api/v1/config/status", async () => ({
-  model: {
-    provider: deps.model.name,
-    modelId: deps.model.modelId,
-    subAgentModelId: deps.subAgentModel?.modelId ?? deps.model.modelId,
-    configured: Boolean(process.env.MODEL_API_KEY),
-    transport: process.env.MODEL_TRANSPORT ?? "responses",
-    baseUrl: process.env.MODEL_API_BASE_URL ?? "https://api.meta.ai/v1",
-  },
-  projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH), path: process.env.PROJECT_DNA_PATH ?? null },
-  github: {
-    configured: deps.github.configured,
-    appConfigured: deps.github.appConfigured,
-    userIntegrationConfigured: githubIntegration.configured,
-    missing: githubIntegration.missingConfiguration,
-    slug: githubIntegration.config.slug,
-  },
-  sandboxMode: deps.runner.mode,
-  execution: {
-    provider: process.env.DNAFIX_EXECUTION_PROVIDER === "codebuild" ? "codebuild" : "local",
-    remoteConfigured: deps.remoteExecution?.configured() ?? false,
-    project: process.env.AWS_CODEBUILD_PROJECT ?? null,
-    bucket: process.env.AWS_ARTIFACT_BUCKET ?? process.env.AWS_ARTIFACTS_BUCKET ?? null,
-    region: process.env.AWS_REGION ?? "ap-southeast-2",
-  },
-  workflowEngine: process.env.WORKFLOW_ENGINE === "temporal" ? "temporal" : "in-process-durable",
-  temporalAddress: process.env.TEMPORAL_ADDRESS ?? null,
-}));
+/** Live readiness payload. Recomputed per request so runtime configuration changes are reflected immediately. */
+function configStatusPayload() {
+  return {
+    model: {
+      provider: deps.model.name,
+      modelId: deps.model.modelId,
+      subAgentModelId: deps.subAgentModel?.modelId ?? deps.model.modelId,
+      configured: Boolean(process.env.MODEL_API_KEY),
+      transport: process.env.MODEL_TRANSPORT ?? "responses",
+      baseUrl: process.env.MODEL_API_BASE_URL ?? "https://api.meta.ai/v1",
+    },
+    projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH), path: process.env.PROJECT_DNA_PATH ?? null },
+    github: {
+      configured: deps.github.configured,
+      appConfigured: deps.github.appConfigured,
+      userIntegrationConfigured: githubIntegration.configured,
+      missing: githubIntegration.missingConfiguration,
+      slug: githubIntegration.config.slug,
+    },
+    sandboxMode: deps.runner.mode,
+    execution: {
+      provider: process.env.DNAFIX_EXECUTION_PROVIDER === "codebuild" ? "codebuild" : "local",
+      remoteConfigured: deps.remoteExecution?.configured() ?? false,
+      project: process.env.AWS_CODEBUILD_PROJECT ?? null,
+      bucket: process.env.AWS_ARTIFACT_BUCKET ?? process.env.AWS_ARTIFACTS_BUCKET ?? null,
+      region: process.env.AWS_REGION ?? "ap-southeast-2",
+    },
+    workflowEngine: process.env.WORKFLOW_ENGINE === "temporal" ? "temporal" : "in-process-durable",
+    temporalAddress: process.env.TEMPORAL_ADDRESS ?? null,
+  };
+}
+
+app.get("/api/v1/config/status", async () => configStatusPayload());
+
+/** SSE readiness stream: pushes the current status immediately, then whenever it changes. */
+app.get("/api/v1/config/status/events", async (req, reply) => {
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  reply.raw.write("retry: 3000\n\n");
+  let lastPayload = "";
+  const publish = () => {
+    const payload = JSON.stringify(configStatusPayload());
+    if (payload === lastPayload) return;
+    lastPayload = payload;
+    reply.raw.write(`event: status\ndata: ${payload}\n\n`);
+  };
+  publish();
+  const poll = setInterval(publish, 1_000);
+  const heartbeat = setInterval(() => reply.raw.write(": keep-alive\n\n"), 15_000);
+  req.raw.on("close", () => {
+    clearInterval(poll);
+    clearInterval(heartbeat);
+  });
+});
 
 app.get("/api/v1/repositories", async () => deps.store.listRepositories());
 

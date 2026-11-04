@@ -1,12 +1,50 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "./Icon";
 import { Skeleton } from "./ui";
 import { api, type ConfigStatus } from "../lib/api";
 import { readinessItems, type ReadinessTone } from "../lib/status";
 
+let configEventSource: EventSource | null = null;
+let configEventUsers = 0;
+let configEventClient: QueryClient | null = null;
+
+/** One shared readiness stream per tab; React Query remains the polling fallback. */
+function subscribeConfigStatus(queryClient: QueryClient): () => void {
+  configEventUsers += 1;
+  configEventClient = queryClient;
+  if (!configEventSource && typeof window !== "undefined" && "EventSource" in window) {
+    const source = new EventSource("/api/v1/config/status/events");
+    configEventSource = source;
+    source.addEventListener("status", (event) => {
+      try {
+        const status = JSON.parse((event as MessageEvent<string>).data) as ConfigStatus;
+        configEventClient?.setQueryData(["config-status"], status);
+      } catch {
+        /* Ignore malformed frames; polling remains the fallback. */
+      }
+    });
+  }
+  return () => {
+    configEventUsers = Math.max(0, configEventUsers - 1);
+    if (configEventUsers === 0 && configEventSource) {
+      configEventSource.close();
+      configEventSource = null;
+      configEventClient = null;
+    }
+  };
+}
+
 export function useConfigStatus() {
-  return useQuery({ queryKey: ["config-status"], queryFn: () => api<ConfigStatus>("/config/status"), refetchInterval: 15_000 });
+  const queryClient = useQueryClient();
+  useEffect(() => subscribeConfigStatus(queryClient), [queryClient]);
+  return useQuery({
+    queryKey: ["config-status"],
+    queryFn: () => api<ConfigStatus>("/config/status"),
+    refetchInterval: 10_000,
+    refetchOnWindowFocus: true,
+  });
 }
 
 const DOT: Record<ReadinessTone, string> = {
@@ -94,17 +132,23 @@ export function ReadinessPanel({ config }: { config?: ConfigStatus }) {
             <Icon name="fact_check" size={16} className="text-[#5E6AD2]" />
             <h2 className="text-[13px] font-medium leading-[18px] tracking-[-0.01em] text-[#ECEEF0]">System Readiness</h2>
           </div>
-          {blockedCount > 0 ? (
-            <span className="flex items-center gap-1 rounded-full border border-[#E5484D]/30 bg-[#E5484D]/10 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-[18px] text-[#E5484D]">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#E5484D]" aria-hidden />
-              {blockedCount} Required Action{blockedCount > 1 ? "s" : ""}
+          <div className="flex items-center gap-1.5" aria-live="polite" aria-atomic="true">
+            <span className="hidden items-center gap-1 font-mono text-[10px] uppercase tracking-[0.03em] text-[#5E626E] sm:flex" title="Live updates from the API">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#27A567]" aria-hidden />
+              Live
             </span>
-          ) : (
-            <span className="flex items-center gap-1 rounded-full border border-[#27A567]/20 bg-[#27A567]/10 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-[18px] text-[#34D399]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#27A567]" aria-hidden />
-              Ready
-            </span>
-          )}
+            {blockedCount > 0 ? (
+              <span className="flex items-center gap-1 rounded-full border border-[#E5484D]/30 bg-[#E5484D]/10 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-[18px] text-[#E5484D]">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#E5484D]" aria-hidden />
+                {blockedCount} Required Action{blockedCount > 1 ? "s" : ""}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 rounded-full border border-[#27A567]/20 bg-[#27A567]/10 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-[18px] text-[#34D399]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#27A567]" aria-hidden />
+                Ready
+              </span>
+            )}
+          </div>
         </div>
         <p className="text-[12px] leading-4 text-[#8A8F98]">Continuous infrastructure status prior to dispatching an agentic plan.</p>
       </div>
