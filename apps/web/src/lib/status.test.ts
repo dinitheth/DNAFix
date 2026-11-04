@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuditEvent, ConfigStatus } from "./api";
-import { blockingReasons, formatClock, formatDuration, formatSpan, formatStarted, lastStartedStage, readinessItems, repositoryLabel, runAttempts, runStages, stageOfAction, stageTimings } from "./status";
+import { blockingReasons, briefMessage, decisionsWaiting, formatAgo, formatClock, formatDuration, formatSpan, formatStarted, lastStartedStage, readinessHref, readinessItems, repositoryLabel, runAttempts, runStages, stageOfAction, stageTimings, verificationCandidates } from "./status";
 
 const config = (over: Partial<ConfigStatus> = {}): ConfigStatus => ({
   model: { provider: "meta-muse-wonder", modelId: "muse-wonder-1.0", subAgentModelId: "muse-spark-1.3", configured: true, transport: "responses", baseUrl: "https://api.meta.ai/v1" },
@@ -195,5 +195,60 @@ describe("formatting helpers", () => {
   it("labels repositories by GitHub name or last two path segments", () => {
     expect(repositoryLabel({ repositoryPath: "x" }, [{ id: "gh", localPath: null, githubOwner: "acme", githubRepo: "api" }], "gh")).toBe("acme/api");
     expect(repositoryLabel({ repositoryPath: "G:\\work\\acme\\api" }, [], "local_1")).toBe("acme/api");
+  });
+
+  it("keeps only the first sentence of a long blocker for summary surfaces", () => {
+    const long = "PROJECT_DNA_PATH is not set. Clone the repo, install it, then set the variable. DNAFix does not fabricate repository analysis.";
+    expect(briefMessage(long)).toBe("PROJECT_DNA_PATH is not set.");
+    expect(briefMessage("Single sentence with no trailing stop")).toBe("Single sentence with no trailing stop");
+    expect(briefMessage(`.${"x".repeat(300)}`)).toHaveLength(180);
+  });
+
+  it("says how old a recorded timestamp is instead of showing a raw clock", () => {
+    const now = Date.parse("2026-01-01T12:00:00Z");
+    expect(formatAgo("2026-01-01T11:59:55Z", now)).toBe("just now");
+    expect(formatAgo("2026-01-01T11:59:00Z", now)).toBe("1m ago");
+    expect(formatAgo("2026-01-01T09:00:00Z", now)).toBe("3h ago");
+    expect(formatAgo("2025-12-29T12:00:00Z", now)).toBe("3d ago");
+    expect(formatAgo("2026-01-01T13:00:00Z", now)).toBe("just now");
+    expect(formatAgo("not a date", now)).toBe("—");
+  });
+});
+
+describe("decision queues", () => {
+  const check = { id: "test", kind: "command", status: "failed", result: null };
+
+  it("asks the server for a verdict only on runs that recorded checks and are not finished", () => {
+    const runs = [
+      { id: "a", state: "FINAL_VERIFICATION", verificationChecks: [check] },
+      { id: "b", state: "COMPLETED", verificationChecks: [check] },
+      { id: "c", state: "AGENT_EXECUTION", verificationChecks: null },
+      { id: "d", state: "BLOCKED", verificationChecks: [] },
+    ];
+    expect(verificationCandidates(runs).map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("caps how many verdicts one page asks for at a time", () => {
+    const runs = Array.from({ length: 20 }, (_, index) => ({ id: `r${index}`, state: "FINAL_VERIFICATION", verificationChecks: [check] }));
+    expect(verificationCandidates(runs)).toHaveLength(12);
+  });
+
+  it("counts paused runs, verdicts needing a human and open MCP requests together", () => {
+    const runs = [
+      { state: "AWAITING_PLAN_APPROVAL" },
+      { state: "NEEDS_CLARIFICATION" },
+      { state: "AWAITING_PR_APPROVAL" },
+      { state: "AGENT_EXECUTION" },
+      { state: "COMPLETED" },
+    ];
+    expect(decisionsWaiting(runs, 0, 0)).toBe(3);
+    expect(decisionsWaiting(runs, 2, 1)).toBe(6);
+    expect(decisionsWaiting([], 0, 0)).toBe(0);
+  });
+
+  it("points each readiness item at the surface that can fix it", () => {
+    expect(readinessHref("dna")).toBe("/settings#dna");
+    expect(readinessHref("github")).toBe("/connectors/github");
+    expect(readinessHref("unknown")).toBe("/settings");
   });
 });

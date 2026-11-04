@@ -5,7 +5,7 @@ import { Icon } from "./Icon";
 import { useConfigStatus } from "../lib/config-status";
 import { usePendingApprovals } from "../lib/approvals";
 import { api, type Run } from "../lib/api";
-import { readinessItems } from "../lib/status";
+import { readinessHref, readinessItems, briefMessage } from "../lib/status";
 
 interface Notice {
   id: string;
@@ -26,20 +26,6 @@ function loadSeen(): Set<string> {
   } catch {
     return new Set();
   }
-}
-
-const RECOVERY_HREF: Record<string, string> = {
-  planner: "/settings#model",
-  dna: "/settings#dna",
-  github: "/connectors/github",
-  execution: "/settings#execution",
-  workflow: "/settings#workflow",
-};
-
-/** The bell is a summary surface: backend errors can run to several sentences and the run page carries all of them. */
-function brief(message: string): string {
-  const first = (message.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? message).trim();
-  return first.length > 180 ? `${first.slice(0, 179).trimEnd()}…` : first;
 }
 
 export function NotificationsBell() {
@@ -69,7 +55,7 @@ export function NotificationsBell() {
             tone: item.tone === "blocked" ? "blocked" : "attention",
             title: `${item.label} — ${item.state}`,
             message: item.recovery ? `${item.explanation} ${item.recovery}` : item.explanation,
-            href: RECOVERY_HREF[item.id] ?? "/settings",
+            href: readinessHref(item.id),
           });
         }
       }
@@ -89,7 +75,7 @@ export function NotificationsBell() {
         id: `run-${run.id}`,
         tone: "blocked",
         title: `Run ${run.state.toLowerCase()}: ${run.issueTitle.slice(0, 60)}`,
-        message: run.error ? brief(run.error) : "Check the run for details.",
+        message: run.error ? briefMessage(run.error) : "Check the run for details.",
         href: `/runs/${run.id}`,
       });
     }

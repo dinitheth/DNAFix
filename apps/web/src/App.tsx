@@ -6,7 +6,8 @@ import { NotificationsBell } from "./components/NotificationsBell";
 import { api, type Run } from "./lib/api";
 import { usePendingApprovals } from "./lib/approvals";
 import { useConfigStatus } from "./lib/config-status";
-import { readinessItems } from "./lib/status";
+import { useVerificationDecisions } from "./lib/queues";
+import { decisionsWaiting, readinessItems } from "./lib/status";
 import { NewAnalysis } from "./pages/NewAnalysis";
 import { Overview } from "./pages/Overview";
 import { Approvals } from "./pages/Approvals";
@@ -170,11 +171,12 @@ function Shell() {
   const runsQuery = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs") });
   // The bell polls this key; the badge reads the same cache.
   const pendingApprovals = usePendingApprovals();
+  const { decisions } = useVerificationDecisions(runsQuery.data ?? []);
   const [searchOpen, setSearchOpen] = useState(false);
 
   const blockers = config.data ? readinessItems(config.data).filter((i) => i.tone === "blocked").length : 0;
   const activeRuns = (runsQuery.data ?? []).filter((r) => !TERMINAL_STATES.includes(r.state)).length;
-  const waitingApprovals = pendingApprovals.data?.length ?? 0;
+  const waitingDecisions = decisionsWaiting(runsQuery.data ?? [], decisions.length, pendingApprovals.data?.length ?? 0);
 
   const runMatch = /^\/runs\/(.+)$/.exec(location.pathname);
   const currentPage = PAGES.find((page) => isActive(location.pathname, page.to));
@@ -217,7 +219,7 @@ function Shell() {
           <nav className="flex flex-col gap-0.5 px-1.5 pb-1.5" aria-label="Primary">
             {NAV.map((item, index) => {
               const active = isActive(location.pathname, item.to);
-              const waiting = item.to === "/approvals" ? waitingApprovals : 0;
+              const waiting = item.to === "/approvals" ? waitingDecisions : 0;
               const running = item.to === "/runs" ? activeRuns : 0;
               return (
                 <Fragment key={item.to}>

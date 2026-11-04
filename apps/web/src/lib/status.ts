@@ -131,6 +131,18 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
   return items;
 }
 
+/** Where an operator goes to clear each readiness item. */
+export function readinessHref(id: string): string {
+  const map: Record<string, string> = {
+    planner: "/settings#model",
+    dna: "/settings#dna",
+    github: "/connectors/github",
+    execution: "/settings#execution",
+    workflow: "/settings#workflow",
+  };
+  return map[id] ?? "/settings";
+}
+
 /** Required dependencies that block starting a new analysis (GitHub and workflow choice never block). */
 export function blockingReasons(config: ConfigStatus): string[] {
   return readinessItems(config)
@@ -319,6 +331,20 @@ export function formatDuration(createdAt: string, updatedAt: string): string {
   return `${Math.floor(min / 60)}h ${min % 60}m`;
 }
 
+/** How long ago a recorded timestamp is, from the clock the page already has. */
+export function formatAgo(iso: string, now = Date.now()): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "—";
+  const sec = Math.max(0, Math.floor((now - ms) / 1000));
+  if (sec < 10) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 /** Compact local start stamp for dense tables: `Nov 5 03:12`. */
 export function formatStarted(iso: string): string {
   const d = new Date(iso);
@@ -334,6 +360,32 @@ export function repositoryLabel(run: Pick<Run, "repositoryPath">, repos: Array<{
   const p = repo?.localPath ?? run.repositoryPath;
   const parts = p.replaceAll("\\", "/").split("/").filter(Boolean);
   return parts.slice(-2).join("/") || p;
+}
+
+/** Runs that carry recorded verification checks and are not finished. */
+export function verificationCandidates<T extends Pick<Run, "state" | "verificationChecks">>(runs: T[]): T[] {
+  return runs
+    .filter((run) => (run.verificationChecks?.length ?? 0) > 0 && run.state !== "COMPLETED")
+    .slice(0, 12);
+}
+
+/**
+ * Everything the inbox treats as "waiting on you": the three run states that
+ * pause for a human, the verdicts the server says need one, and open MCP
+ * permission requests. Kept here so the sidebar badge and the page agree.
+ */
+export function decisionsWaiting(runs: Array<Pick<Run, "state">>, verificationDecisions: number, mcpPending: number): number {
+  const paused = runs.filter((run) => ["AWAITING_PLAN_APPROVAL", "NEEDS_CLARIFICATION", "AWAITING_PR_APPROVAL"].includes(run.state)).length;
+  return paused + verificationDecisions + mcpPending;
+}
+
+/**
+ * Backend blockers run to several sentences. Summary surfaces show the first
+ * sentence and keep the whole text available; the run page carries all of it.
+ */
+export function briefMessage(message: string): string {
+  const first = (message.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? message).trim();
+  return first.length > 180 ? `${first.slice(0, 179).trimEnd()}…` : first;
 }
 
 export function stateLabel(state: string): string {

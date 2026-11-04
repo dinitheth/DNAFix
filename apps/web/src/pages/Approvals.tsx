@@ -1,11 +1,12 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import { Button, EmptyState, SectionLabel, Skeleton, StatusPill, Textarea } from "../components/ui";
-import { api, type McpApproval, type RepositoryRecord, type Run, type RunVerification } from "../lib/api";
-import { repositoryLabel, stateLabel, stateTone } from "../lib/status";
+import { api, type McpApproval, type RepositoryRecord, type Run } from "../lib/api";
+import { useVerificationDecisions } from "../lib/queues";
+import { decisionsWaiting, repositoryLabel, stateLabel, stateTone } from "../lib/status";
 
 const MCP_FILTERS = ["Waiting", "Decided", "All"] as const;
 type McpFilter = (typeof MCP_FILTERS)[number];
@@ -111,20 +112,7 @@ export function Approvals() {
   const prQueue = all.filter((r) => r.state === "AWAITING_PR_APPROVAL");
 
   // Verification decisions are computed by the API from recorded evidence, so they are read per run.
-  const verificationCandidates = useMemo(
-    () => all.filter((r) => r.verificationChecks && r.verificationChecks.length > 0 && r.state !== "COMPLETED").slice(0, 12),
-    [all],
-  );
-  const verifications = useQueries({
-    queries: verificationCandidates.map((run) => ({
-      queryKey: ["run-verification", run.id],
-      queryFn: () => api<RunVerification>(`/runs/${run.id}/verification`),
-      refetchInterval: 10_000,
-    })),
-  });
-  const verificationQueue = verificationCandidates
-    .map((run, index) => ({ run, data: verifications[index]?.data }))
-    .filter((entry) => (entry.data?.evaluation.needsHuman.length ?? 0) > 0);
+  const { decisions: verificationQueue } = useVerificationDecisions(all);
 
   const mcpAll = useMemo(() => approvals.data ?? [], [approvals.data]);
   const mcpPending = mcpAll.filter((a) => a.status === "pending");
@@ -135,7 +123,7 @@ export function Approvals() {
   const mcpShown = mcpFilter === "Waiting" ? mcpPending : mcpFilter === "Decided" ? mcpAll.filter((a) => a.status !== "pending") : mcpAll;
   const mcpVisible = mcpShown.filter((a) => matches(`${a.serverName} ${a.toolName} ${a.runId} ${a.summary}`));
 
-  const waiting = planQueue.length + clarificationQueue.length + verificationQueue.length + prQueue.length + mcpPending.length;
+  const waiting = decisionsWaiting(all, verificationQueue.length, mcpPending.length);
 
   return (
     <div>
@@ -292,8 +280,8 @@ export function Approvals() {
               <div className="flex flex-col gap-2">
                 {verificationQueue
                   .filter((entry) => matches(entry.run.issueTitle))
-                  .map(({ run, data }) => {
-                    const needsHuman = data?.evaluation.needsHuman ?? [];
+                  .map(({ run, evaluation }) => {
+                    const needsHuman = evaluation.needsHuman;
                     const waived = new Set((run.verificationWaivers ?? []).map((w) => w.checkId));
                     const waivable = (run.verificationChecks ?? []).filter((check) => check.status === "pre-existing-failure" && !waived.has(check.id));
                     const form = waivers[run.id] ?? { checkId: waivable[0]?.id ?? "", reason: "", evidence: "" };
