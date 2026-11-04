@@ -69,9 +69,38 @@ export interface ConfigStatus {
 }
 
 export interface VerificationCheckView {
+  id: string;
   kind: string;
   status: string;
-  result: { argv: string[]; exitCode: number | null; sandboxMode?: string } | null;
+  result: {
+    argv: string[];
+    cwd?: string;
+    exitCode: number | null;
+    timedOut?: boolean;
+    durationMs?: number;
+    stdoutSummary?: string;
+    stderrSummary?: string;
+    sandboxMode?: "docker" | "host" | "codebuild";
+  } | null;
+  notes?: string;
+}
+
+export interface VerificationWaiverView {
+  checkId: string;
+  reason: string;
+  evidence: string;
+  waivedBy: string;
+  waivedAt: string;
+}
+
+/** GET /runs/:id/verification — the honest verdict, computed server-side from the recorded evidence. */
+export interface RunVerification {
+  baselineChecks: VerificationCheckView[];
+  verificationChecks: VerificationCheckView[] | null;
+  verifierReview: Run["verifierReview"];
+  repairAttempts: number;
+  waivers: VerificationWaiverView[];
+  evaluation: { ok: boolean; repairable: string[]; needsHuman: string[]; notes: string[]; regressionEvidence: boolean };
 }
 
 export interface Run {
@@ -88,15 +117,24 @@ export interface Run {
   workflowEngine: string;
   baseCommitSha: string | null;
   repositorySnapshotId: string | null;
+  /** Set once Project DNA has produced the impact snapshot this run was planned against. */
+  impactSnapshotId?: string | null;
   changedPaths: string[];
   diff: string;
   pullRequestUrl: string | null;
   pullRequestNumber: number | null;
   error: string | null;
   repairAttempts: number;
+  baseRef?: string;
+  clarificationAnswer?: string | null;
+  nominatedTargets?: string[];
+  /** Human-approved exclusions for checks that already failed at baseline. */
+  verificationWaivers?: Array<{ checkId: string; reason: string; evidence: string; waivedBy: string; waivedAt: string }>;
+  /** Outward-facing effects, journaled before each one happened. */
+  effects?: Array<{ key: string; kind: string; status: "started" | "completed"; detail: string | null; startedAt: string; completedAt: string | null }>;
   createdAt: string;
   updatedAt: string;
-  analysis: { summary: string; requirements: string[]; acceptanceCriteria: string[]; ambiguities: string[]; assumptions: string[]; riskLevel: string } | null;
+  analysis: { summary: string; problemDescription: string; expectedBehavior: string; requirements: string[]; acceptanceCriteria: string[]; ambiguities: string[]; assumptions: string[]; riskLevel: string } | null;
   plan: {
     tasks: Array<{ id: string; title: string; description: string; fileScope: string[]; dependsOn: string[]; acceptanceCriteria: string[]; testExpectations: string[] }>;
     predictedAffectedPaths: Array<{ path: string; source: string; reason: string; evidence?: string | null }>;
@@ -128,6 +166,7 @@ export interface Run {
     lifecycleState?: string | null;
     deleteNotBefore?: string | null;
     logsReference: string | null;
+    summary?: string;
   }>;
 }
 
