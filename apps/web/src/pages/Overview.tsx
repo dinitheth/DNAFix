@@ -3,9 +3,8 @@ import { Link } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { StatusPill } from "../components/ui";
 import { api, type RepositoryRecord, type Run } from "../lib/api";
-import { stateLabel, stateTone } from "../lib/status";
-import { useConfigStatus } from "../components/ReadinessPanel";
-import { readinessItems } from "../lib/status";
+import { useConfigStatus } from "../lib/config-status";
+import { readinessItems, stateLabel, stateTone } from "../lib/status";
 
 export function Overview() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs"), refetchInterval: 5_000 });
@@ -49,7 +48,7 @@ export function Overview() {
 
       {blockers > 0 && (
         <Link to="/settings" className="mt-3 flex items-center gap-2 rounded-xl border border-[#E5484D]/30 bg-[#E5484D]/5 px-3 py-2 text-[12px] text-[#E5484D] hover:bg-[#E5484D]/10">
-          <Icon name="warning" size={15} /> {blockers} required action{blockers > 1 ? "s" : ""} — open the notification bell or Settings to resolve.
+          <Icon name="warning" size={15} /> {blockers} required action{blockers > 1 ? "s" : ""} — resolve in Settings.
         </Link>
       )}
 

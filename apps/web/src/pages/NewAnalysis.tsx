@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { GitHubSourcePanel } from "../components/GitHubSourcePanel";
 import { Icon } from "../components/Icon";
-import { useConfigStatus } from "../components/ReadinessPanel";
+import { useConfigStatus } from "../lib/config-status";
 import { SectionLabel } from "../components/ui";
 import {
   api,
@@ -281,13 +281,8 @@ export function NewAnalysis() {
       {/* Workbench header */}
       <header className="mb-3 flex flex-col gap-1 border-b border-[#26282E] pb-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <h1 className="text-[20px] font-semibold leading-[26px] tracking-[-0.02em] text-[#ECEEF0]">New Analysis</h1>
-          </div>
+          <h1 className="text-[20px] font-semibold leading-[26px] tracking-[-0.02em] text-[#ECEEF0]">New Analysis</h1>
         </div>
-        <p className="mt-0.5 max-w-2xl text-[13px] leading-[18px] text-[#8A8F98]">
-          Understand the repository. Investigate the issue. Prepare a verified engineering change with reproducible telemetry.
-        </p>
       </header>
 
       {callbackNotice && (
@@ -429,7 +424,7 @@ export function NewAnalysis() {
                 ) : (
                   <div className="mt-1 flex items-center justify-between text-[#8A8F98]">
                     <p className="text-[12px] leading-4 text-[#5E626E]">
-                      Absolute filesystem path to local Git repository accessible to server. Working tree will not be mutated.
+                      Absolute path to a local Git repository. The working tree is never mutated.
                     </p>
                   </div>
                 )}
@@ -596,8 +591,8 @@ export function NewAnalysis() {
                   ) : (
                     <span className="mt-0.5 text-[12px] leading-4 text-[#5E626E]">
                       {imported && !importedDirty
-                        ? "Imported verbatim from GitHub. Editing keeps the source link and enables “Restore from GitHub”."
-                        : "State the failure mechanism, expected behavior, and verification boundary. Deterministic patch generation depends on precise invariants."}
+                        ? "Imported verbatim from GitHub."
+                        : "Failure mechanism, expected behavior, verification boundary."}
                     </span>
                   )}
                 </div>
@@ -683,14 +678,21 @@ export function NewAnalysis() {
               </section>
 
               {blockers.length > 0 && (
-                <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-                  Analysis is blocked by {blockers.length} required action{blockers.length > 1 ? "s" : ""}. Check the notification bell in the top
-                  bar to resolve {blockers.length > 1 ? "them" : "it"}.
-                </p>
+                <div className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
+                  <p className="font-medium">Blocked until {blockers.length} required action{blockers.length > 1 ? "s are" : " is"} resolved</p>
+                  <ul className="mt-1 space-y-0.5 text-[#E5484D]/90">
+                    {blockers.map((reason) => (
+                      <li key={reason} className="flex gap-1.5">
+                        <span aria-hidden>·</span>
+                        <span>{reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               {serverError && (
                 <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-                  The API rejected this submission: {serverError}. Your input has been preserved — fix the problem and try again.
+                  API rejected this submission: {serverError}
                 </p>
               )}
             </>

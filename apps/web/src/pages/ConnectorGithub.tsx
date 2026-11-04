@@ -34,7 +34,7 @@ export function ConnectorGithub() {
       <header className="mt-3 flex items-center gap-3">
         <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#24292f] text-white"><Icon name="code" size={22} /></span>
         <div>
-          <h1 className="text-[18px] font-semibold text-white">Github</h1>
+          <h1 className="text-[18px] font-semibold text-white">GitHub</h1>
           <p className="font-mono text-[11px] text-[#8A8F98]">{data?.connected ? `connected as ${data.account?.login ?? ""}` : data?.configured ? "not connected" : "not configured"}</p>
         </div>
         <span className="ml-auto"><StatusPill tone={data?.connected ? "success" : data?.configured ? "warning" : "neutral"}>{data?.connected ? "Connected" : data?.configured ? "Not connected" : "Not configured"}</StatusPill></span>
@@ -50,7 +50,7 @@ export function ConnectorGithub() {
           <Row label="App slug" value={data?.appSlug ?? "—"} mono />
         </dl>
         <div className="mt-3 flex flex-wrap gap-2">
-          {!data?.connected && <Button variant="primary" loading={busy} disabled={!data?.configured} onClick={() => void connect()}>Connect Github</Button>}
+          {!data?.connected && <Button variant="primary" loading={busy} disabled={!data?.configured} onClick={() => void connect()}>Connect GitHub</Button>}
           {data?.connected && <Button variant="danger-ghost" loading={busy} onClick={() => void disconnect()}>Disconnect</Button>}
           {data?.appSlug && <a className="inline-flex h-8 items-center rounded-md border border-[#2E3038] bg-[#222329] px-3 text-[13px] text-white hover:border-[#424652]" href={`https://github.com/apps/${data.appSlug}/installations/new`} target="_blank" rel="noreferrer">Install App</a>}
           <Link to="/new" className="inline-flex h-8 items-center rounded-md border border-[#2E3038] bg-[#222329] px-3 text-[13px] text-white hover:border-[#424652]">Browse repositories</Link>

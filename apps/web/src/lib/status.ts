@@ -27,7 +27,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           label: "Planner Model",
           tone: "blocked",
           state: "Unconfigured",
-          explanation: "No active API key detected in the backend host runtime.",
+          explanation: "No MODEL_API_KEY in the API process.",
           recovery: "Configure MODEL_API_KEY →",
         },
     config.projectDna.configured
@@ -36,14 +36,14 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           label: "Structural Analysis",
           tone: "ready",
           state: "Available",
-          explanation: "Deterministic AST parser and cross-file dependency graph engine available.",
+          explanation: "Deterministic AST and dependency-graph analysis available.",
         }
       : {
           id: "dna",
           label: "Structural Analysis",
           tone: "blocked",
           state: "Unconfigured",
-          explanation: "Repository intelligence is unavailable. Runs stop before planning.",
+          explanation: "Runs stop before planning.",
           recovery: "Install submodule deps or set PROJECT_DNA_PATH →",
         },
     (config.github.userIntegrationConfigured ?? config.github.configured)
@@ -52,7 +52,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           label: "GitHub Integration",
           tone: "ready",
           state: "App configured",
-          explanation: "GitHub App credentials are present. Connect your account in New Analysis to browse repositories and issues.",
+          explanation: "GitHub App ready. Connect your account to import issues and open draft PRs.",
         }
       : {
           id: "github",
@@ -61,7 +61,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           state: "Not configured",
           explanation: config.github.missing?.length
             ? `Optional. Missing: ${config.github.missing.join(", ")}.`
-            : "Optional. Patches will be written directly as local Git diffs without automated PR generation.",
+            : "Optional. Without it, runs end in local Git diffs.",
           recovery: "See docs/GITHUB_APP_SETUP.md →",
         },
   ];
@@ -99,7 +99,7 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
       label: "Execution Engine",
       tone: "attention",
       state: "Host sandbox",
-      explanation: "Builds and tests run directly on this host. No OS isolation — trusted repositories and fixtures only.",
+      explanation: "Runs directly on this host with no OS isolation. Trusted repositories only.",
     });
   }
 
@@ -118,14 +118,14 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
             label: "Workflow Persistence",
             tone: "attention",
             state: "JSON file",
-            explanation: "Single-process store. The API and worker running together overwrite each other's runs — use the default SQLite store.",
+            explanation: "Single-process JSON store; API and worker overwrite each other. Use the SQLite default.",
           }
         : {
             id: "workflow",
             label: "Workflow Persistence",
             tone: "ready",
             state: "Durable",
-            explanation: "Every transition commits to the shared SQLite store. A run stopped mid-phase stays where it stopped; resume is not built yet.",
+            explanation: "Every transition commits to shared SQLite. Resume after a crash is not built yet.",
           },
   );
   return items;

@@ -8,6 +8,29 @@ import { runStages, stateLabel, stateTone, type StageStatus } from "../lib/statu
 
 const API = "/api/v1";
 
+/**
+ * Backend errors can run to several sentences. The first one is what the operator
+ * needs at a glance; the rest stays reachable instead of filling the page.
+ */
+function Alert({ message, prefix }: { message: string; prefix?: string }) {
+  const head = message.length > 140 ? (message.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? message.slice(0, 140)).trim() : message;
+  const rest = message.slice(head.length).trim();
+  return (
+    <div className="mb-3 rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
+      {prefix}
+      {head}
+      {rest && (
+        <details className="mt-1">
+          <summary className="cursor-pointer list-none font-mono text-[10px] uppercase tracking-wide text-[#E5484D]/75 hover:text-[#E5484D]">
+            Full message
+          </summary>
+          <div className="mt-1 whitespace-pre-wrap break-words text-[#E5484D]/90">{rest}</div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 const STAGE: Record<StageStatus, { icon: string; className: string; label: string }> = {
   completed: { icon: "check_circle", className: "text-[#34D399]", label: "Complete" },
   running: { icon: "progress_activity", className: "animate-spin text-[#BDC2FF]", label: "Running" },
@@ -284,16 +307,8 @@ export function RunDetail() {
         </section>
       )}
 
-      {r.error && (
-        <p className="mb-3 rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-          {r.error}
-        </p>
-      )}
-      {actionError && (
-        <p className="mb-3 rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-          Action failed: {actionError}
-        </p>
-      )}
+      {r.error && <Alert message={r.error} />}
+      {actionError && <Alert message={actionError} prefix="Action failed: " />}
 
       {r.state === "NEEDS_CLARIFICATION" && (
         <section className="mb-3 rounded-xl border border-[#E5A158]/30 bg-[#1A1B20] p-3 shadow-sm">

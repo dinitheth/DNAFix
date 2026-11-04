@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Button, StatusPill } from "../components/ui";
-import { useConfigStatus } from "../components/ReadinessPanel";
+import { useConfigStatus } from "../lib/config-status";
 import type { ConfigStatus } from "../lib/api";
 
 function Row({ label, value, tone }: { label: string; value: string; tone?: "ok" | "bad" | "warn" }) {
@@ -57,18 +57,23 @@ export function Settings() {
           <Group id="execution" title="Execution">
             <Row label="Provider" value={data.execution.provider} />
             <Row label="Sandbox" value={data.sandboxMode} tone={data.sandboxMode === "docker" ? "ok" : "warn"} />
-            <Row label="Region" value={data.execution.region} />
-            <Row label="CodeBuild" value={data.execution.project ?? "—"} />
-            <Row label="Remote" value={data.execution.remoteConfigured ? "configured" : "not configured"} tone={data.execution.remoteConfigured ? "ok" : undefined} />
+            {data.execution.provider === "codebuild" && (
+              <>
+                <Row label="Region" value={data.execution.region} />
+                <Row label="CodeBuild" value={data.execution.project ?? "—"} tone={data.execution.remoteConfigured ? "ok" : "bad"} />
+                <Row label="Artifacts" value={data.execution.bucket ?? "—"} />
+              </>
+            )}
           </Group>
 
           <Group id="workflow" title="Workflow">
             <Row label="Engine" value={data.workflowEngine} tone="ok" />
+            <Row label="Store" value={data.store?.location ?? "—"} tone={data.store?.kind === "sqlite" ? "ok" : "warn"} />
             <Row label="Temporal" value={data.temporalAddress ?? "—"} />
           </Group>
 
           <Group id="github" title="Integrations" action={<Link to="/connectors" className="text-[12px] text-[#BDC2FF] hover:underline">Open Connectors</Link>}>
-            <Row label="Github" value={(data.github.userIntegrationConfigured ?? data.github.configured) ? "configured" : "not configured"} tone={(data.github.userIntegrationConfigured ?? data.github.configured) ? "ok" : "warn"} />
+            <Row label="GitHub" value={(data.github.userIntegrationConfigured ?? data.github.configured) ? "configured" : "not configured"} tone={(data.github.userIntegrationConfigured ?? data.github.configured) ? "ok" : "warn"} />
             <Row label="Docker MCP" value="manage in Connectors" />
           </Group>
 

@@ -8,7 +8,7 @@ const DOCS = [
   { title: "Security", file: "SECURITY.md", desc: "Trust boundaries and controls" },
   { title: "Model Integration", file: "MODEL_INTEGRATION.md", desc: "Muse Wonder endpoint, transport, tool calling" },
   { title: "Project DNA Integration", file: "INTEGRATION_PROJECT_DNA.md", desc: "Deterministic repository intelligence bridge" },
-  { title: "Github App Setup", file: "GITHUB_APP_SETUP.md", desc: "App registration, env, token lifecycle" },
+  { title: "GitHub App Setup", file: "GITHUB_APP_SETUP.md", desc: "App registration, env, token lifecycle" },
   { title: "MCP Connectors", file: "MCP_CONNECTORS.md", desc: "Docker MCP setup, permissions, approvals, API" },
   { title: "AWS Execution", file: "AWS_EXECUTION.md", desc: "Optional CodeBuild remote execution" },
   { title: "Implementation Status", file: "IMPLEMENTATION_STATUS.md", desc: "Verified, blocked, and untested areas" },

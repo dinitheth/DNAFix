@@ -2,9 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/Icon";
-import { useConfigStatus } from "./components/ReadinessPanel";
 import { NotificationsBell } from "./components/NotificationsBell";
 import { api, type Run } from "./lib/api";
+import { useConfigStatus } from "./lib/config-status";
 import { readinessItems } from "./lib/status";
 import { NewAnalysis } from "./pages/NewAnalysis";
 import { Overview } from "./pages/Overview";
@@ -162,8 +162,9 @@ function Shell() {
   const blockers = config.data ? readinessItems(config.data).filter((i) => i.tone === "blocked").length : 0;
   const activeRuns = (runsQuery.data ?? []).filter((r) => !TERMINAL_STATES.includes(r.state)).length;
 
-  const pageTitle = location.pathname.startsWith("/runs/")
-    ? "Run Workspace"
+  const runMatch = /^\/runs\/(.+)$/.exec(location.pathname);
+  const pageTitle = runMatch
+    ? `Run ${runMatch[1]}`
     : location.pathname === "/runs"
       ? "Runs"
       : location.pathname === "/repositories"
