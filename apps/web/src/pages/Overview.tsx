@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Icon } from "../components/Icon";
-import { ReadinessPanel, useConfigStatus } from "../components/ReadinessPanel";
 import { SectionLabel, StatusPill } from "../components/ui";
 import { api, type RepositoryRecord, type Run } from "../lib/api";
 import { formatDuration, repositoryLabel, stateLabel, stateTone } from "../lib/status";
@@ -37,7 +36,6 @@ export function Overview() {
   const location = useLocation();
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs") });
   const repos = useQuery({ queryKey: ["repos"], queryFn: () => api<RepositoryRecord[]>("/repositories") });
-  const config = useConfigStatus();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof STATUS_FILTERS)[number]>("All states");
 
@@ -56,9 +54,8 @@ export function Overview() {
   );
 
   return (
-    <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="min-w-0">
-        <header className="mb-3 flex flex-col gap-1 border-b border-[#26282E] pb-3">
+    <div className="min-w-0">
+      <header className="mb-3 flex flex-col gap-1 border-b border-[#26282E] pb-3">
           <h1 className="text-[20px] font-semibold leading-[26px] tracking-[-0.02em] text-[#ECEEF0]">Overview</h1>
           <p className="mt-0.5 max-w-2xl text-[13px] leading-[18px] text-[#8A8F98]">
             Monitor analyses, verified changes, and repository readiness across the workbench.
@@ -226,16 +223,6 @@ export function Overview() {
             </div>
           )}
         </section>
-      </div>
-
-      <aside className="flex min-w-0 flex-col gap-2">
-        <ReadinessPanel config={config.data} />
-        {config.isError && (
-          <p className="text-[12px] leading-4 text-[#E5484D]" role="alert">
-            API unreachable: {(config.error as Error).message}
-          </p>
-        )}
-      </aside>
     </div>
   );
 }

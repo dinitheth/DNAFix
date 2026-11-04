@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "./components/Icon";
 import { useConfigStatus } from "./components/ReadinessPanel";
+import { NotificationsBell } from "./components/NotificationsBell";
 import { api, type Run } from "./lib/api";
 import { readinessItems } from "./lib/status";
 import { NewAnalysis } from "./pages/NewAnalysis";
@@ -349,6 +350,8 @@ function Shell() {
               <span className="font-mono text-[11px] font-medium">{health.label}</span>
             </div>
 
+            <NotificationsBell />
+
             <Link
               to="/settings"
               className="flex h-6 w-6 items-center justify-center rounded-full border border-[#2E3038] bg-[#282A31] transition-colors hover:border-[#424652]"
@@ -359,6 +362,7 @@ function Shell() {
           </div>
 
           <div className="flex items-center gap-3 lg:hidden">
+            <NotificationsBell />
             <Link to="/" aria-label="Overview" className={iconClass(overviewActive)}>
               <Icon name="grid_view" size={18} />
             </Link>

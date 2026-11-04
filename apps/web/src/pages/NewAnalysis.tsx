@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { GitHubSourcePanel } from "../components/GitHubSourcePanel";
 import { Icon } from "../components/Icon";
-import { ReadinessPanel, useConfigStatus } from "../components/ReadinessPanel";
+import { useConfigStatus } from "../components/ReadinessPanel";
 import { SectionLabel } from "../components/ui";
 import {
   api,
@@ -313,7 +313,7 @@ export function NewAnalysis() {
       {/* Primary split-pane working grid */}
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
         {/* Left column: main form */}
-        <form onSubmit={submit} noValidate className="flex min-w-0 flex-col gap-3 lg:col-span-8">
+        <form onSubmit={submit} noValidate className="flex min-w-0 flex-col gap-3 lg:col-span-12">
           {/* 01 / Repository source */}
           <section className="flex flex-col rounded-xl border border-[#26282E] bg-[#1A1B20] p-3 shadow-sm" aria-label="Repository source">
             <div className="mb-2 flex items-center justify-between">
@@ -684,8 +684,8 @@ export function NewAnalysis() {
 
               {blockers.length > 0 && (
                 <p className="rounded-lg border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
-                  Analysis is blocked by {blockers.length} required action{blockers.length > 1 ? "s" : ""}. Review System Readiness to resolve{" "}
-                  {blockers.length > 1 ? "them" : "it"}.
+                  Analysis is blocked by {blockers.length} required action{blockers.length > 1 ? "s" : ""}. Check the notification bell in the top
+                  bar to resolve {blockers.length > 1 ? "them" : "it"}.
                 </p>
               )}
               {serverError && (
@@ -696,11 +696,6 @@ export function NewAnalysis() {
             </>
           )}
         </form>
-
-        {/* Right column: system readiness */}
-        <aside className="flex min-w-0 flex-col gap-2 lg:col-span-4">
-          <ReadinessPanel config={config.data} />
-        </aside>
       </div>
     </div>
   );
