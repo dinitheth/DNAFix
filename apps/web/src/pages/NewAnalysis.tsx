@@ -443,6 +443,7 @@ export function NewAnalysis() {
                   selectedRepository={selectedRepository}
                   onIssueLoaded={(detail) => applyImportedIssue(detail, false)}
                   selectedIssueNumber={imported?.issue.number ?? null}
+                  autoOpenGitHub={callbackNotice?.tone === "success"}
                 />
                 {!selectedRepository && repositoryPath && (
                   <p className="mt-1.5 text-[11px] leading-4 text-[#8A8F98]">

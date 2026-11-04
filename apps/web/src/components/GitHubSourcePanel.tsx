@@ -53,6 +53,18 @@ function Avatar({ url, login, size = 20 }: { url: string | null; login: string; 
   );
 }
 
+function GitHubMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg className="shrink-0 fill-current" width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <path
+        clipRule="evenodd"
+        fillRule="evenodd"
+        d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+      />
+    </svg>
+  );
+}
+
 function LabelChip({ name, color }: { name: string; color: string | null }) {
   return (
     <span
@@ -149,10 +161,15 @@ export interface GitHubSourcePanelProps {
   selectedRepository: GitHubRepository | null;
   onIssueLoaded: (detail: GitHubIssueDetailResponse) => void;
   selectedIssueNumber: number | null;
+  /** Reveal the connected panel immediately, e.g. after returning from GitHub OAuth. */
+  autoOpenGitHub?: boolean;
 }
 
+type GitHubPanelView = "choose" | "github" | "manual";
+
 export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
-  const { status, statusLoading, statusError, onRefreshStatus, repositoryPath, onRepositoryPathChange, selectedRepository, onIssueLoaded, selectedIssueNumber } = props;
+  const { status, statusLoading, statusError, onRefreshStatus, repositoryPath, onRepositoryPathChange, selectedRepository, onIssueLoaded, selectedIssueNumber, autoOpenGitHub } = props;
+  const [view, setView] = useState<GitHubPanelView>(() => (autoOpenGitHub || selectedRepository ? "github" : "choose"));
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -250,6 +267,15 @@ export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
       setActionError(errorMessage(err));
       setBusy(null);
     }
+  }
+
+  function openGitHub() {
+    setActionError(null);
+    if (connected || !configured) {
+      setView("github");
+      return;
+    }
+    void connect();
   }
 
   async function install() {
@@ -408,8 +434,8 @@ export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
     );
   }
 
-  return (
-    <div className="mt-2 flex flex-col gap-2">
+  const feedback = (
+    <>
       {actionError && (
         <p className="rounded-md border border-[#E5484D]/25 bg-[#E5484D]/5 px-2 py-1.5 text-[12px] leading-4 text-[#E5484D]" role="alert">
           {actionError}
@@ -420,6 +446,119 @@ export function GitHubSourcePanel(props: GitHubSourcePanelProps) {
           {notice}
         </p>
       )}
+    </>
+  );
+
+  if (view === "choose") {
+    return (
+      <div className="mt-2 flex flex-col gap-2">
+        {feedback}
+        <div className="rounded-lg border border-[#2E3038] bg-[#141518] p-3">
+          <button
+            type="button"
+            onClick={openGitHub}
+            disabled={busy !== null}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-[#30363D] bg-[#0D1117] text-[13px] font-semibold text-white shadow-sm transition-colors hover:border-[#484F58] hover:bg-[#161B22] disabled:opacity-60"
+          >
+            <GitHubMark size={18} />
+            {busy === "connect" ? "Redirecting…" : "Log in with GitHub"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("manual")}
+            className="mt-2 flex h-8 w-full items-center justify-center rounded-md text-[12px] font-medium text-[#8A8F98] transition-colors hover:bg-[#1E2026] hover:text-[#ECEEF0]"
+          >
+            Enter Manually
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === "manual") {
+    return (
+      <div className="mt-2 flex flex-col gap-2">
+        {feedback}
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10px] uppercase tracking-[0.03em] text-[#5E626E]">Manual entry</span>
+          <button type="button" onClick={() => setView("choose")} className="text-[10px] text-[#8A8F98] underline-offset-2 hover:text-[#ECEEF0] hover:underline">
+            Back
+          </button>
+        </div>
+
+        <div className="rounded-lg border border-[#2E3038] bg-[#141518]">
+          <div className="flex items-center gap-1.5 border-b border-[#26282E] px-2 py-1.5">
+            <Icon name="folder_open" size={14} className="text-[#5E626E]" />
+            <span className="font-mono text-[10px] uppercase tracking-[0.03em] text-[#5E626E]">Repository</span>
+          </div>
+          <div className="flex items-center gap-1.5 p-2">
+            <input
+              value={repositoryPath}
+              onChange={(e) => onRepositoryPathChange(e.target.value, null)}
+              placeholder="https://github.com/owner/repository or owner/repository"
+              spellCheck={false}
+              className="h-7 min-w-0 flex-1 rounded border border-[#2E3038] bg-[#1A1B20] px-2 font-mono text-[11px] text-[#ECEEF0] placeholder:text-[#5E626E] focus:border-[#5E6AD2] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void submitManualRepository()}
+              disabled={busy !== null}
+              className="h-7 rounded border border-[#2E3038] bg-[#222329] px-2.5 text-[11px] text-[#ECEEF0] hover:border-[#424652] disabled:opacity-50"
+            >
+              {busy === "manual-repo" ? "Verifying…" : "Use"}
+            </button>
+          </div>
+          <p className="px-2 pb-2 text-[10px] leading-4 text-[#5E626E]">
+            {connected
+              ? "The repository is verified through the GitHub App before an issue can be imported."
+              : "Public repositories can be referenced without GitHub App access. Connect GitHub to import an issue."}
+          </p>
+        </div>
+
+        {connected && selectedRepository && (
+          <div className="rounded-lg border border-[#2E3038] bg-[#141518]">
+            <div className="flex items-center gap-1.5 border-b border-[#26282E] px-2 py-1.5">
+              <Icon name="bug_report" size={14} className="text-[#5E626E]" />
+              <span className="font-mono text-[10px] uppercase tracking-[0.03em] text-[#5E626E]">Issue</span>
+            </div>
+            <div className="flex items-center gap-1.5 p-2">
+              <input
+                value={manualIssue}
+                onChange={(e) => setManualIssue(e.target.value)}
+                placeholder="142 or https://github.com/owner/repo/issues/142"
+                spellCheck={false}
+                className="h-7 min-w-0 flex-1 rounded border border-[#2E3038] bg-[#1A1B20] px-2 font-mono text-[11px] text-[#ECEEF0] placeholder:text-[#5E626E] focus:border-[#5E6AD2] focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => void submitManualIssue()}
+                disabled={busy !== null}
+                className="h-7 rounded border border-[#2E3038] bg-[#222329] px-2.5 text-[11px] text-[#ECEEF0] hover:border-[#424652] disabled:opacity-50"
+              >
+                {busy?.startsWith("issue-") ? "Fetching…" : "Fetch"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {connected && selectedRepository && (
+          <p className="flex items-center gap-1 font-mono text-[10px] text-[#5E626E]">
+            <Icon name="verified" size={12} className="text-[#27A567]" />
+            {selectedRepository.fullName} · {selectedRepository.defaultBranch} · installation verified
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-2">
+      {feedback}
+      <div className="flex items-center justify-end">
+        <button type="button" onClick={() => setView("choose")} className="text-[10px] text-[#8A8F98] underline-offset-2 hover:text-[#ECEEF0] hover:underline">
+          Change source
+        </button>
+      </div>
 
       {!configured && (
         <div className="rounded-lg border border-[#E5A158]/25 bg-[#E5A158]/5 p-2.5">
