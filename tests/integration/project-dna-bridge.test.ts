@@ -5,14 +5,14 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ProjectDNAAdapter } from "@dnafix/repository-intelligence";
+import { ProjectDNAAdapter, resolveProjectDnaPath } from "@dnafix/repository-intelligence";
 
 const exec = promisify(execFile);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, "..", "fixtures", "sample-repo");
-const dnaPath = process.env.PROJECT_DNA_PATH;
+const dnaPath = resolveProjectDnaPath();
 
-describe.skipIf(!dnaPath)("Project DNA bridge (real analysis, requires PROJECT_DNA_PATH + Node 22)", () => {
+describe.skipIf(!dnaPath)("Project DNA bridge (real analysis, requires the vendor/Project-DNA checkout)", () => {
   it("analyses the fixture repo at the exact base commit and returns impact for a target", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "dnafix-dna-"));
     const repo = path.join(root, "repo");

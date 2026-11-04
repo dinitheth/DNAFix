@@ -121,6 +121,7 @@ app.get("/health", async () => ({ status: "ok", service: "dnafix-api", time: new
 
 /** Live readiness payload. Recomputed per request so runtime configuration changes are reflected immediately. */
 function configStatusPayload() {
+  const projectDnaPath = deps.intelligence.location ?? null;
   return {
     model: {
       provider: deps.model.name,
@@ -130,7 +131,7 @@ function configStatusPayload() {
       transport: process.env.MODEL_TRANSPORT ?? "responses",
       baseUrl: process.env.MODEL_API_BASE_URL ?? "https://api.meta.ai/v1",
     },
-    projectDna: { configured: Boolean(process.env.PROJECT_DNA_PATH?.trim()), path: process.env.PROJECT_DNA_PATH?.trim() || null },
+    projectDna: { configured: Boolean(projectDnaPath), path: projectDnaPath },
     github: {
       configured: deps.github.configured,
       appConfigured: deps.github.appConfigured,

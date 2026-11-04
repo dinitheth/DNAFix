@@ -8,13 +8,19 @@ import { RepositoryIntelligenceReportSchema, type RepositoryIntelligenceReport }
  * Default Project DNA location resolution:
  * 1. PROJECT_DNA_PATH (explicit, always wins)
  * 2. vendor/Project-DNA git submodule at the DNAFix repository root
+ * The fallback is anchored to this package's own location, not process.cwd(),
+ * because the API and worker can be started from their app directories.
  * Project DNA is consumed only through its public IProjectDNAService API;
  * its source is never copied into DNAFix packages (ADR-0002).
  */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
 export function resolveProjectDnaPath(explicit = process.env.PROJECT_DNA_PATH ?? ""): string {
-  if (explicit) return explicit;
-  const candidate = path.resolve(process.cwd(), "vendor", "Project-DNA");
-  return existsSync(path.join(candidate, "packages", "dna-core", "src", "index.ts")) ? candidate : "";
+  if (explicit.trim()) return explicit.trim();
+  for (const candidate of [path.join(REPO_ROOT, "vendor", "Project-DNA"), path.resolve(process.cwd(), "vendor", "Project-DNA")]) {
+    if (existsSync(path.join(candidate, "packages", "dna-core", "src", "index.ts"))) return candidate;
+  }
+  return "";
 }
 
 export class RepositoryIntelligenceError extends Error {
@@ -27,10 +33,21 @@ export class RepositoryIntelligenceError extends Error {
 /** Port: deterministic repository intelligence. Facts only — no model hypotheses. */
 export interface RepositoryIntelligence {
   readonly providerName: string;
+  /** Where the real Project DNA checkout resolved to, for readiness reporting. Absent for test doubles. */
+  readonly location?: string | null;
   analyze(input: { rootPath: string; baseCommitSha: string; targetPaths: string[]; changedPaths?: string[] }): Promise<RepositoryIntelligenceReport>;
 }
 
 const BRIDGE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bridge", "project-dna-bridge.ts");
+
+/**
+ * Runtime used to execute the bridge. Project DNA declares Node >=22.23.2 <23,
+ * so an operator can pin an isolated runtime with PROJECT_DNA_NODE_PATH without
+ * changing the Node version DNAFix itself runs on.
+ */
+export function projectDnaRuntime(): string {
+  return process.env.PROJECT_DNA_NODE_PATH?.trim() || process.execPath;
+}
 
 /**
  * Adapter over Project DNA's public IProjectDNAService, executed out-of-process
@@ -39,20 +56,23 @@ const BRIDGE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), ".."
  */
 export class ProjectDNAAdapter implements RepositoryIntelligence {
   readonly providerName = "project-dna";
+  readonly location: string | null;
   constructor(
     private readonly projectDnaPath = resolveProjectDnaPath(),
     private readonly timeoutMs = Number(process.env.PROJECT_DNA_TIMEOUT_MS ?? 600_000),
-  ) {}
+  ) {
+    this.location = this.projectDnaPath || null;
+  }
 
   async analyze(input: { rootPath: string; baseCommitSha: string; targetPaths: string[]; changedPaths?: string[] }): Promise<RepositoryIntelligenceReport> {
     if (!this.projectDnaPath) {
       throw new RepositoryIntelligenceError(
-        "PROJECT_DNA_PATH is not set. Clone https://github.com/dinitheth/Project-DNA, run `pnpm install` under Node 22.23.2, and set PROJECT_DNA_PATH to that checkout. DNAFix does not fabricate repository analysis.",
+        "Project DNA is not reachable: set PROJECT_DNA_PATH or populate the vendor/Project-DNA submodule and run `pnpm install` under Node 22.23.2. DNAFix does not fabricate repository analysis.",
       );
     }
     const payload = JSON.stringify({ ...input, projectDnaPath: this.projectDnaPath });
     const stdout = await new Promise<string>((resolve, reject) => {
-      const child = spawn(process.execPath, ["--import", "tsx", BRIDGE_PATH], {
+      const child = spawn(projectDnaRuntime(), ["--import", "tsx", BRIDGE_PATH], {
         env: { ...process.env, PROJECT_DNA_PATH: this.projectDnaPath },
         windowsHide: true,
       });
