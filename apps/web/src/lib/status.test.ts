@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConfigStatus } from "./api";
-import { blockingReasons, formatDuration, readinessItems, repositoryLabel, runStages } from "./status";
+import { blockingReasons, formatDuration, formatStarted, readinessItems, repositoryLabel, runStages } from "./status";
 
 const config = (over: Partial<ConfigStatus> = {}): ConfigStatus => ({
   model: { provider: "meta-muse-wonder", modelId: "muse-wonder-1.0", subAgentModelId: "muse-spark-1.3", configured: true, transport: "responses", baseUrl: "https://api.meta.ai/v1" },
@@ -62,6 +62,11 @@ describe("formatting helpers", () => {
   it("formats durations compactly", () => {
     expect(formatDuration("2026-01-01T00:00:00Z", "2026-01-01T00:00:45Z")).toBe("45s");
     expect(formatDuration("2026-01-01T00:00:00Z", "2026-01-01T00:11:05Z")).toBe("11m 5s");
+  });
+
+  it("renders a compact start stamp and a dash instead of Invalid Date", () => {
+    expect(formatStarted("2026-01-01T00:00:45Z")).toMatch(/^Jan 1 \d{2}:\d{2}$/);
+    expect(formatStarted("not a date")).toBe("—");
   });
 
   it("labels repositories by GitHub name or last two path segments", () => {

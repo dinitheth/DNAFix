@@ -185,6 +185,15 @@ export function formatDuration(createdAt: string, updatedAt: string): string {
   return `${Math.floor(min / 60)}h ${min % 60}m`;
 }
 
+/** Compact local start stamp for dense tables: `Nov 5 03:12`. */
+export function formatStarted(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${date} ${time}`;
+}
+
 export function repositoryLabel(run: Pick<Run, "repositoryPath">, repos: Array<{ id: string; localPath: string | null; githubOwner: string | null; githubRepo: string | null }>, repositoryId: string): string {
   const repo = repos.find((r) => r.id === repositoryId);
   if (repo?.githubOwner && repo.githubRepo) return `${repo.githubOwner}/${repo.githubRepo}`;
