@@ -30,7 +30,7 @@ function loadSeen(): Set<string> {
 const RECOVERY_HREF: Record<string, string> = {
   planner: "/settings#model",
   dna: "/settings#dna",
-  github: "/settings#github",
+  github: "/connectors/github",
   execution: "/settings#execution",
   workflow: "/settings#workflow",
 };

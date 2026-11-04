@@ -549,7 +549,7 @@ export function RunDetail() {
             icon="hub"
             title="MCP Activity"
             actions={
-              <Link to="/connectors" className="text-[11px] text-[#BDC2FF] hover:text-white hover:underline">
+              <Link to="/connectors/docker" className="text-[11px] text-[#BDC2FF] hover:text-white hover:underline">
                 Manage
               </Link>
             }

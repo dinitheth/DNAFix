@@ -638,6 +638,7 @@ Useful scripts: `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm bu
 
 ## Documentation index
 
+- [`docs/SYSTEM_GUIDE.md`](docs/SYSTEM_GUIDE.md) — end-to-end system guide: workflow, pages, connectors
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — modules, lifecycle, evidence rules
 - [`docs/SECURITY.md`](docs/SECURITY.md) — trust boundaries and controls
 - [`docs/INTEGRATION_PROJECT_DNA.md`](docs/INTEGRATION_PROJECT_DNA.md) — bridge design and setup

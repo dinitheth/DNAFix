@@ -11,15 +11,21 @@ import { Overview } from "./pages/Overview";
 import { RunDetail } from "./pages/RunDetail";
 import { Settings } from "./pages/Settings";
 import { Connectors } from "./pages/Connectors";
+import { ConnectorDocker } from "./pages/ConnectorDocker";
+import { ConnectorGithub } from "./pages/ConnectorGithub";
+import { Docs } from "./pages/Docs";
+import { Repositories } from "./pages/Repositories";
+import { Runs } from "./pages/Runs";
 
 const TERMINAL_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
 
 const PAGES = [
   { label: "Overview", to: "/", icon: "grid_view" },
   { label: "New Analysis", to: "/new", icon: "add_circle" },
-  { label: "Runs", to: "/#runs", icon: "commit" },
-  { label: "Repositories", to: "/#repositories", icon: "source_environment" },
+  { label: "Runs", to: "/runs", icon: "commit" },
+  { label: "Repositories", to: "/repositories", icon: "source_environment" },
   { label: "Connectors", to: "/connectors", icon: "hub" },
+  { label: "Docs", to: "/docs", icon: "menu_book" },
   { label: "Settings", to: "/settings", icon: "settings" },
 ] as const;
 
@@ -158,19 +164,25 @@ function Shell() {
 
   const pageTitle = location.pathname.startsWith("/runs/")
     ? "Run Workspace"
-    : location.pathname === "/new"
-      ? "New Analysis"
-      : location.pathname === "/settings"
-        ? "Settings"
-        : location.pathname === "/connectors"
-          ? "Connectors"
-          : "Overview";
+    : location.pathname === "/runs"
+      ? "Runs"
+      : location.pathname === "/repositories"
+        ? "Repositories"
+        : location.pathname === "/new"
+          ? "New Analysis"
+          : location.pathname === "/settings"
+            ? "Settings"
+            : location.pathname.startsWith("/connectors")
+              ? "Connectors"
+              : location.pathname === "/docs"
+                ? "Docs"
+                : "Overview";
 
-  const overviewActive = location.pathname === "/" && location.hash !== "#runs" && location.hash !== "#repositories";
-  const runsActive = location.pathname.startsWith("/runs/") || (location.pathname === "/" && location.hash === "#runs");
-  const reposActive = location.pathname === "/" && location.hash === "#repositories";
+  const overviewActive = location.pathname === "/";
+  const runsActive = location.pathname === "/runs" || location.pathname.startsWith("/runs/");
+  const reposActive = location.pathname === "/repositories";
   const newActive = location.pathname === "/new";
-  const connectorsActive = location.pathname === "/connectors";
+  const connectorsActive = location.pathname.startsWith("/connectors");
   const settingsActive = location.pathname === "/settings";
 
   useEffect(() => {
@@ -225,7 +237,7 @@ function Shell() {
               </span>
             </Link>
 
-            <Link to="/#runs" aria-current={runsActive ? "page" : undefined} className={navClass(runsActive)}>
+            <Link to="/runs" aria-current={runsActive ? "page" : undefined} className={navClass(runsActive)}>
               <span className={itemClass(runsActive)}>
                 <Icon name="commit" size={16} className={iconClass(runsActive)} />
                 Runs
@@ -238,7 +250,7 @@ function Shell() {
               )}
             </Link>
 
-            <Link to="/#repositories" aria-current={reposActive ? "page" : undefined} className={navClass(reposActive)}>
+            <Link to="/repositories" aria-current={reposActive ? "page" : undefined} className={navClass(reposActive)}>
               <span className={itemClass(reposActive)}>
                 <Icon name="source_environment" size={16} className={iconClass(reposActive)} />
                 Repositories
@@ -335,15 +347,10 @@ function Shell() {
               <kbd className="rounded border border-[#2E3038] bg-[#222329] px-1 py-0.5 font-mono text-[10px] text-[#5E626E]">⌘K</kbd>
             </button>
 
-            <a
-              href="https://github.com/dinitheth/DNAFix/tree/main/docs"
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1.5 text-[12px] text-[#8A8F98] transition-colors hover:text-[#ECEEF0]"
-            >
+            <Link to="/docs" className="flex items-center gap-1.5 text-[12px] text-[#8A8F98] transition-colors hover:text-[#ECEEF0]">
               <Icon name="menu_book" size={15} className="text-[#8A8F98]" />
               Docs
-            </a>
+            </Link>
 
             <div className={`flex items-center gap-1.5 rounded-full border px-2 py-0.5 ${health.shell}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${health.dot}`} aria-hidden />
@@ -369,7 +376,7 @@ function Shell() {
             <Link to="/new" aria-label="New Analysis" className={iconClass(newActive)}>
               <Icon name="add_circle" size={18} />
             </Link>
-            <Link to="/#runs" aria-label="Runs" className={iconClass(runsActive)}>
+            <Link to="/runs" aria-label="Runs" className={iconClass(runsActive)}>
               <Icon name="commit" size={18} />
             </Link>
             <Link to="/connectors" aria-label="Connectors" className={iconClass(connectorsActive)}>
@@ -390,8 +397,13 @@ function Shell() {
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/new" element={<NewAnalysis />} />
+              <Route path="/runs" element={<Runs />} />
               <Route path="/runs/:id" element={<RunDetail />} />
+              <Route path="/repositories" element={<Repositories />} />
               <Route path="/connectors" element={<Connectors />} />
+              <Route path="/connectors/docker" element={<ConnectorDocker />} />
+              <Route path="/connectors/github" element={<ConnectorGithub />} />
+              <Route path="/docs" element={<Docs />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </div>
