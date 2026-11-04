@@ -18,7 +18,6 @@ interface CatalogPlugin {
   id: PluginId;
   name: string;
   description: string;
-  /** Tile appearance: brand-like solid color + glyph, no external images. */
   tileBg: string;
   tileFg: string;
   glyph: string;
@@ -92,6 +91,106 @@ export function Connectors() {
   const pending = (view?.approvals ?? []).filter((a) => a.status === "pending");
   const connected = view?.state === "connected";
 
+  function catalogNote(name: string) {
+    setNotice(
+      `${name} is not a separate DNAFix plugin. It lives in the Docker MCP Catalog — enable it inside a Docker Desktop MCP profile, then connect that profile in the Docker Desktop panel below.`
+    );
+  }
+
+  function row(plugin: CatalogPlugin) {
+    if (plugin.id === "github-app") {
+      const isConnected = github.data?.connected === true;
+      const configured = github.data?.configured === true;
+      return (
+        <div key={plugin.id} className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Tile plugin={plugin} />
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-semibold text-white">{plugin.name}</p>
+              <p className="truncate text-[13px] text-[#8A8F98]">{isConnected && github.data?.account ? `Connected as ${github.data.account.login}` : plugin.description}</p>
+            </div>
+          </div>
+          {isConnected ? (
+            <StatusPill tone="success">Connected</StatusPill>
+          ) : (
+            <button
+              type="button"
+              aria-label="Connect GitHub App"
+              disabled={!configured}
+              title={configured ? "Connect GitHub App" : "GitHub App is not configured on the API host"}
+              onClick={async () => {
+                try {
+                  const res = await api<{ authorizeUrl: string }>("/integrations/github/connect", {
+                    method: "POST",
+                    body: JSON.stringify({ returnTo: "/connectors" })
+                  });
+                  window.location.assign(res.authorizeUrl);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : String(err));
+                }
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A8F98] hover:bg-[#26282E] hover:text-white disabled:opacity-40"
+            >
+              <Icon name="add" size={20} />
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (plugin.id === "docker-desktop") {
+      return (
+        <div key={plugin.id} className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Tile plugin={plugin} />
+            <div className="min-w-0">
+              <p className="truncate text-[15px] font-semibold text-white">{plugin.name}</p>
+              <p className="truncate text-[13px] text-[#8A8F98]">
+                {connected ? `Connected${view?.profileId ? ` · ${view.profileId}` : ""}` : view ? view.reason || plugin.description : plugin.description}
+              </p>
+            </div>
+          </div>
+          {connected ? (
+            <StatusPill tone="success">Connected</StatusPill>
+          ) : (
+            <button
+              type="button"
+              aria-label={dockerOpen ? "Close Docker Desktop panel" : "Configure Docker Desktop"}
+              aria-expanded={dockerOpen}
+              onClick={() => setDockerOpen((v) => !v)}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A8F98] hover:bg-[#26282E] hover:text-white"
+            >
+              <Icon name={dockerOpen ? "remove" : "add"} size={20} />
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div key={plugin.id} className="flex items-center justify-between gap-3 opacity-90">
+        <div className="flex min-w-0 items-center gap-3">
+          <Tile plugin={plugin} />
+          <div className="min-w-0">
+            <p className="truncate text-[15px] font-semibold text-white">
+              {plugin.name} <span className="ml-1 rounded bg-[#26282E] px-1.5 py-0.5 text-[10px] font-medium text-[#8A8F98]">via Docker</span>
+            </p>
+            <p className="truncate text-[13px] text-[#8A8F98]">{plugin.description}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label={`How to enable ${plugin.name}`}
+          title="Available in the Docker MCP Catalog — enable it in a Docker Desktop MCP profile"
+          onClick={() => catalogNote(plugin.name)}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A8F98] hover:bg-[#26282E] hover:text-white"
+        >
+          <Icon name="info" size={18} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6">
       <label className="relative block">
@@ -111,8 +210,11 @@ export function Connectors() {
         </div>
       )}
       {notice && (
-        <div role="status" className="rounded-lg border border-[#5E6AD2]/30 bg-[#5E6AD2]/10 px-3 py-2 text-[12px] text-[#BDC2FF]">
-          {notice}
+        <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-[#5E6AD2]/30 bg-[#5E6AD2]/10 px-3 py-2 text-[12px] text-[#BDC2FF]">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice" className="shrink-0 opacity-70 hover:opacity-100">
+            <Icon name="close" size={14} />
+          </button>
         </div>
       )}
       {pending.length > 0 && (
@@ -140,163 +242,66 @@ export function Connectors() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
-        {filtered.map((plugin) => {
-          if (plugin.id === "github-app") {
-            const isConnected = github.data?.connected === true;
-            const configured = github.data?.configured === true;
-            return (
-              <div key={plugin.id} className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 items-center gap-3">
-                  <Tile plugin={plugin} />
-                  <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold text-white">{plugin.name}</p>
-                    <p className="truncate text-[13px] text-[#8A8F98]">{isConnected && github.data?.account ? `Connected as ${github.data.account.login}` : plugin.description}</p>
-                  </div>
-                </div>
-                {isConnected ? (
-                  <StatusPill tone="success">Connected</StatusPill>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label="Connect GitHub App"
-                    disabled={!configured}
-                    title={configured ? "Connect GitHub App" : "GitHub App is not configured on the API host"}
-                    onClick={async () => {
-                      try {
-                        const res = await api<{ authorizeUrl: string }>("/integrations/github/connect", {
-                          method: "POST",
-                          body: JSON.stringify({ returnTo: "/connectors" })
-                        });
-                        window.location.assign(res.authorizeUrl);
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : String(err));
-                      }
-                    }}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A8F98] hover:bg-[#26282E] hover:text-white disabled:opacity-40"
-                  >
-                    <Icon name="add" size={20} />
-                  </button>
-                )}
-              </div>
-            );
-          }
+      <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">{filtered.map(row)}</div>
 
-          if (plugin.id === "docker-desktop") {
-            return (
-              <div key={plugin.id} className="flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <Tile plugin={plugin} />
-                    <div className="min-w-0">
-                      <p className="truncate text-[15px] font-semibold text-white">{plugin.name}</p>
-                      <p className="truncate text-[13px] text-[#8A8F98]">
-                        {connected ? `Connected${view?.profileId ? ` · ${view.profileId}` : ""}` : view ? view.reason || plugin.description : plugin.description}
-                      </p>
-                    </div>
-                  </div>
-                  {connected ? (
-                    <StatusPill tone="success">Connected</StatusPill>
-                  ) : (
-                    <button
-                      type="button"
-                      aria-label={dockerOpen ? "Close Docker settings" : "Configure Docker Desktop"}
-                      onClick={() => setDockerOpen((v) => !v)}
-                      className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A8F98] hover:bg-[#26282E] hover:text-white"
-                    >
-                      <Icon name="add" size={20} />
-                    </button>
-                  )}
-                </div>
-                {(dockerOpen || connected) && view && (
-                  <div className="ml-12 flex flex-col gap-2 rounded-xl border border-[#26282E] bg-[#141518] p-3">
-                    <label className="flex flex-col gap-1 text-[12px] text-[#8A8F98]">
-                      Profile
-                      <select
-                        className="h-8 rounded-md border border-[#2E3038] bg-[#0F1013] px-2 text-[13px] text-white focus:border-[#5E6AD2] focus:outline-none disabled:opacity-50"
-                        value={view.profileId ?? ""}
-                        disabled={busy || !view.enabled}
-                        onChange={(e) => run("/mcp/profile", { profileId: e.target.value })}
-                      >
-                        <option value="">Select a profile…</option>
-                        {(view.profiles ?? []).map((profile) => (
-                          <option key={profile.id} value={profile.id}>
-                            {profile.name} ({profile.id})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {view.nextAction && view.state !== "connected" && <p className="text-[12px] text-[#E5A158]">{view.nextAction}</p>}
-                    {view.lastError && view.state !== "connected" && <p className="text-[12px] text-[#E5484D]">{view.lastError}</p>}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {!view.enabled && (
-                        <Button variant="secondary" disabled={busy} onClick={() => run("/mcp/enable", { enabled: true })}>
-                          Enable
-                        </Button>
-                      )}
-                      {view.enabled && !connected && (
-                        <Button
-                          variant="primary"
-                          loading={busy}
-                          disabled={!view.profileId}
-                          onClick={() => run("/mcp/connect", view.profileId ? { profileId: view.profileId } : {})}
-                        >
-                          Connect
-                        </Button>
-                      )}
-                      {connected && (
-                        <>
-                          <Button variant="secondary" loading={busy} onClick={() => run("/mcp/refresh")}>
-                            Refresh
-                          </Button>
-                          <Button variant="danger-ghost" loading={busy} onClick={() => run("/mcp/disconnect")}>
-                            Disconnect
-                          </Button>
-                        </>
-                      )}
-                      <button
-                        type="button"
-                        className="ml-auto flex items-center gap-1 text-[12px] text-[#8A8F98] hover:text-white"
-                        disabled={busy}
-                        onClick={() => run(view.enabled ? "/mcp/disconnect" : "/mcp/enable", view.enabled ? undefined : { enabled: true })}
-                        title={view.enabled ? "Disable connector" : "Enable connector"}
-                      >
-                        <Icon name={view.enabled ? "toggle_on" : "toggle_off"} size={18} />
-                        {view.enabled ? "On" : "Off"}
-                      </button>
-                    </div>
-                    {connected && <p className="text-[11px] text-[#5E626E]">{view.enabledToolCount} of {view.toolCount} tools enabled</p>}
-                  </div>
-                )}
-              </div>
-            );
-          }
-
-          return (
-            <div key={plugin.id} className="flex items-center justify-between gap-3 opacity-90">
-              <div className="flex min-w-0 items-center gap-3">
-                <Tile plugin={plugin} />
-                <div className="min-w-0">
-                  <p className="truncate text-[15px] font-semibold text-white">{plugin.name}</p>
-                  <p className="truncate text-[13px] text-[#8A8F98]">{plugin.description}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label={`Enable ${plugin.name} via Docker Desktop`}
-                title="Available in the Docker MCP Catalog — enable it in a Docker Desktop MCP profile"
-                onClick={() => {
-                  setDockerOpen(true);
-                  setNotice(`${plugin.name} is available in the Docker MCP Catalog. Enable it in a Docker Desktop MCP profile, then use Docker Desktop above to connect. DNAFix never installs servers itself.`);
-                }}
-                className="flex h-7 w-7 items-center justify-center rounded-full text-[#8A8F98] hover:bg-[#26282E] hover:text-white"
-              >
-                <Icon name="add" size={20} />
+      {(dockerOpen || connected) && view && (
+        <section aria-label="Docker Desktop connection" className="flex flex-col gap-2 rounded-xl border border-[#26282E] bg-[#141518] p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-[13px] font-medium text-[#ECEEF0]">Docker Desktop connection</p>
+            {!connected && (
+              <button type="button" onClick={() => setDockerOpen(false)} className="text-[12px] text-[#8A8F98] hover:text-white">
+                Close
               </button>
-            </div>
-          );
-        })}
-      </div>
+            )}
+          </div>
+          <label className="flex flex-col gap-1 text-[12px] text-[#8A8F98]">
+            Profile
+            <select
+              className="h-8 rounded-md border border-[#2E3038] bg-[#0F1013] px-2 text-[13px] text-white focus:border-[#5E6AD2] focus:outline-none disabled:opacity-50"
+              value={view.profileId ?? ""}
+              disabled={busy || !view.enabled}
+              onChange={(e) => run("/mcp/profile", { profileId: e.target.value })}
+            >
+              <option value="">Select a profile…</option>
+              {(view.profiles ?? []).map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name} ({profile.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          {view.nextAction && view.state !== "connected" && <p className="text-[12px] text-[#E5A158]">{view.nextAction}</p>}
+          {view.lastError && view.state !== "connected" && <p className="text-[12px] text-[#E5484D]">{view.lastError}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            {!view.enabled && (
+              <Button variant="secondary" disabled={busy} onClick={() => run("/mcp/enable", { enabled: true })}>
+                Enable
+              </Button>
+            )}
+            {view.enabled && !connected && (
+              <Button
+                variant="primary"
+                loading={busy}
+                disabled={!view.profileId}
+                onClick={() => run("/mcp/connect", view.profileId ? { profileId: view.profileId } : {})}
+              >
+                Connect
+              </Button>
+            )}
+            {connected && (
+              <>
+                <Button variant="secondary" loading={busy} onClick={() => run("/mcp/refresh")}>
+                  Refresh
+                </Button>
+                <Button variant="danger-ghost" loading={busy} onClick={() => run("/mcp/disconnect")}>
+                  Disconnect
+                </Button>
+              </>
+            )}
+          </div>
+          {connected && <p className="text-[11px] text-[#5E626E]">{view.enabledToolCount} of {view.toolCount} tools enabled</p>}
+        </section>
+      )}
 
       {filtered.length === 0 && <p className="text-[13px] text-[#5E626E]">No plugins match “{search.trim()}”.</p>}
     </div>
