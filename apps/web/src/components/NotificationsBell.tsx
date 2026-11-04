@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "./Icon";
 import { useConfigStatus } from "../lib/config-status";
-import { api, type McpApproval, type Run } from "../lib/api";
+import { usePendingApprovals } from "../lib/approvals";
+import { api, type Run } from "../lib/api";
 import { readinessItems } from "../lib/status";
 
 interface Notice {
@@ -43,12 +44,7 @@ function brief(message: string): string {
 
 export function NotificationsBell() {
   const config = useConfigStatus();
-  const approvals = useQuery({
-    queryKey: ["mcp-approvals-pending"],
-    queryFn: () => api<McpApproval[]>("/mcp/approvals?status=pending"),
-    refetchInterval: 10_000,
-    retry: false,
-  });
+  const approvals = usePendingApprovals(true);
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs"), refetchInterval: 15_000 });
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(loadSeen);

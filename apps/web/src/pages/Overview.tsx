@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { StatusPill } from "../components/ui";
 import { api, type RepositoryRecord, type Run } from "../lib/api";
+import { usePendingApprovals } from "../lib/approvals";
 import { useConfigStatus } from "../lib/config-status";
 import { readinessItems, stateLabel, stateTone } from "../lib/status";
 
@@ -10,6 +11,7 @@ export function Overview() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs"), refetchInterval: 5_000 });
   const repos = useQuery({ queryKey: ["repos"], queryFn: () => api<RepositoryRecord[]>("/repositories") });
   const config = useConfigStatus();
+  const pendingApprovals = usePendingApprovals();
 
   const all = runs.data ?? [];
   const active = all.filter((r) => !["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"].includes(r.state)).length;
@@ -17,6 +19,7 @@ export function Overview() {
   const completed = all.filter((r) => r.state === "COMPLETED").length;
   const failed = all.filter((r) => ["FAILED", "BLOCKED"].includes(r.state)).length;
   const blockers = config.data ? readinessItems(config.data).filter((i) => i.tone === "blocked").length : 0;
+  const waitingApprovals = pendingApprovals.data?.length ?? 0;
   const recent = [...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
 
   const cards = [
@@ -49,6 +52,12 @@ export function Overview() {
       {blockers > 0 && (
         <Link to="/settings" className="mt-3 flex items-center gap-2 rounded-xl border border-[#E5484D]/30 bg-[#E5484D]/5 px-3 py-2 text-[12px] text-[#E5484D] hover:bg-[#E5484D]/10">
           <Icon name="warning" size={15} /> {blockers} required action{blockers > 1 ? "s" : ""} — resolve in Settings.
+        </Link>
+      )}
+
+      {waitingApprovals > 0 && (
+        <Link to="/approvals" className="mt-3 flex items-center gap-2 rounded-xl border border-[#E5A158]/30 bg-[#E5A158]/5 px-3 py-2 text-[12px] text-[#E5A158] hover:bg-[#E5A158]/10">
+          <Icon name="pan_tool" size={15} /> {waitingApprovals} MCP tool call{waitingApprovals === 1 ? "" : "s"} waiting for a decision.
         </Link>
       )}
 

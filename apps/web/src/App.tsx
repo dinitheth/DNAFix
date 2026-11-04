@@ -4,10 +4,12 @@ import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { Icon } from "./components/Icon";
 import { NotificationsBell } from "./components/NotificationsBell";
 import { api, type Run } from "./lib/api";
+import { usePendingApprovals } from "./lib/approvals";
 import { useConfigStatus } from "./lib/config-status";
 import { readinessItems } from "./lib/status";
 import { NewAnalysis } from "./pages/NewAnalysis";
 import { Overview } from "./pages/Overview";
+import { Approvals } from "./pages/Approvals";
 import { RunDetail } from "./pages/RunDetail";
 import { Settings } from "./pages/Settings";
 import { Connectors } from "./pages/Connectors";
@@ -23,6 +25,7 @@ const PAGES = [
   { label: "Overview", to: "/", icon: "grid_view" },
   { label: "New Analysis", to: "/new", icon: "add_circle" },
   { label: "Runs", to: "/runs", icon: "commit" },
+  { label: "Approvals", to: "/approvals", icon: "pan_tool" },
   { label: "Repositories", to: "/repositories", icon: "source_environment" },
   { label: "Connectors", to: "/connectors", icon: "hub" },
   { label: "Docs", to: "/docs", icon: "menu_book" },
@@ -157,30 +160,36 @@ function Shell() {
   const config = useConfigStatus();
   const location = useLocation();
   const runsQuery = useQuery({ queryKey: ["runs"], queryFn: () => api<Run[]>("/runs") });
+  // The bell polls this key; the badge reads the same cache.
+  const pendingApprovals = usePendingApprovals();
   const [searchOpen, setSearchOpen] = useState(false);
 
   const blockers = config.data ? readinessItems(config.data).filter((i) => i.tone === "blocked").length : 0;
   const activeRuns = (runsQuery.data ?? []).filter((r) => !TERMINAL_STATES.includes(r.state)).length;
+  const waitingApprovals = pendingApprovals.data?.length ?? 0;
 
   const runMatch = /^\/runs\/(.+)$/.exec(location.pathname);
   const pageTitle = runMatch
     ? `Run ${runMatch[1]}`
     : location.pathname === "/runs"
       ? "Runs"
-      : location.pathname === "/repositories"
-        ? "Repositories"
-        : location.pathname === "/new"
-          ? "New Analysis"
-          : location.pathname === "/settings"
-            ? "Settings"
-            : location.pathname.startsWith("/connectors")
-              ? "Connectors"
-              : location.pathname === "/docs"
-                ? "Docs"
-                : "Overview";
+      : location.pathname === "/approvals"
+        ? "Approvals"
+        : location.pathname === "/repositories"
+          ? "Repositories"
+          : location.pathname === "/new"
+            ? "New Analysis"
+            : location.pathname === "/settings"
+              ? "Settings"
+              : location.pathname.startsWith("/connectors")
+                ? "Connectors"
+                : location.pathname === "/docs"
+                  ? "Docs"
+                  : "Overview";
 
   const overviewActive = location.pathname === "/";
   const runsActive = location.pathname === "/runs" || location.pathname.startsWith("/runs/");
+  const approvalsActive = location.pathname === "/approvals";
   const reposActive = location.pathname === "/repositories";
   const newActive = location.pathname === "/new";
   const connectorsActive = location.pathname.startsWith("/connectors");
@@ -247,6 +256,19 @@ function Shell() {
                 <span className="flex items-center gap-1 rounded-full bg-[#27A567]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#34D399]">
                   <span className="h-1.5 w-1.5 rounded-full bg-[#34D399]" aria-hidden />
                   {activeRuns} active
+                </span>
+              )}
+            </Link>
+
+            <Link to="/approvals" aria-current={approvalsActive ? "page" : undefined} className={navClass(approvalsActive)}>
+              <span className={itemClass(approvalsActive)}>
+                <Icon name="pan_tool" size={16} className={iconClass(approvalsActive)} />
+                Approvals
+              </span>
+              {waitingApprovals > 0 && (
+                <span className="flex items-center gap-1 rounded-full bg-[#E5A158]/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-[#E5A158]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#E5A158]" aria-hidden />
+                  {waitingApprovals} waiting
                 </span>
               )}
             </Link>
@@ -380,6 +402,9 @@ function Shell() {
             <Link to="/runs" aria-label="Runs" className={iconClass(runsActive)}>
               <Icon name="commit" size={18} />
             </Link>
+            <Link to="/approvals" aria-label="Approvals" className={iconClass(approvalsActive)}>
+              <Icon name="pan_tool" size={18} />
+            </Link>
             <Link to="/connectors" aria-label="Connectors" className={iconClass(connectorsActive)}>
               <Icon name="hub" size={18} />
             </Link>
@@ -400,6 +425,7 @@ function Shell() {
               <Route path="/new" element={<NewAnalysis />} />
               <Route path="/runs" element={<Runs />} />
               <Route path="/runs/:id" element={<RunDetail />} />
+              <Route path="/approvals" element={<Approvals />} />
               <Route path="/repositories" element={<Repositories />} />
               <Route path="/connectors" element={<Connectors />} />
               <Route path="/connectors/docker" element={<ConnectorDocker />} />

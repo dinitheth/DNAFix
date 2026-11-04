@@ -98,20 +98,18 @@ export function ConnectorDocker() {
           </section>
 
           {pending.length > 0 && (
-            <section className="mt-3 rounded-xl border border-[#E5A158]/30 bg-[#E5A158]/5 p-3">
-              <p className="text-[13px] font-medium text-[#E5A158]">{pending.length} approval{pending.length === 1 ? "" : "s"} waiting</p>
-              <ul className="mt-2 space-y-2">
-                {pending.map((a) => (
-                  <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2E3038] bg-[#141518] p-2">
-                    <span className="font-mono text-[12px] text-white">{a.serverName}/{a.toolName}</span>
-                    <span className="flex gap-1.5">
-                      <Button variant="danger-ghost" disabled={busy} onClick={() => run(`/runs/${encodeURIComponent(a.runId)}/mcp/approvals/${encodeURIComponent(a.id)}`, { decision: "deny" })}>Deny</Button>
-                      <Button variant="primary" disabled={busy} onClick={() => run(`/runs/${encodeURIComponent(a.runId)}/mcp/approvals/${encodeURIComponent(a.id)}`, { decision: "approve" })}>Approve</Button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            <Link
+              to="/approvals"
+              className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#E5A158]/30 bg-[#E5A158]/5 px-3 py-2 text-[12px] text-[#E5A158] transition-colors hover:bg-[#E5A158]/10"
+            >
+              <span>
+                {pending.length} approval{pending.length === 1 ? "" : "s"} waiting on a decision
+              </span>
+              <span className="flex items-center gap-1">
+                Approvals inbox
+                <Icon name="arrow_forward" size={14} />
+              </span>
+            </Link>
           )}
 
           {connected && (
