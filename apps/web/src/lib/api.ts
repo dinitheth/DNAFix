@@ -65,6 +65,7 @@ export interface ConfigStatus {
   execution: { provider: string; remoteConfigured: boolean; project: string | null; bucket: string | null; region: string };
   workflowEngine: string;
   temporalAddress: string | null;
+  store?: { kind: "sqlite" | "file"; location: string };
 }
 
 export interface VerificationCheckView {

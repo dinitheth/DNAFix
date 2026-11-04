@@ -14,7 +14,7 @@ DNAFix is a modular monolith (ADR-0001) with separately runnable API, web and wo
 | `packages/execution` | Command policy (argv allowlist, env scrub, timeouts, output caps), host runner (explicit dev opt-in), Docker runner (hardened flags). |
 | `packages/verification` | Test discovery, baseline/post runs, diff-vs-impact comparison, verification report. |
 | `packages/github` | GitHub App auth (RS256 JWT → installation token), user OAuth connection, repository/issue discovery with encryption and ETag caching, issue/PR REST adapter, webhook HMAC verification. |
-| `packages/persistence` | `Store` port; JSON file store (dev default) and memory store (tests); Drizzle schema + SQL migration for PostgreSQL. |
+| `packages/persistence` | `Store` port; SQLite store (default, shared by the API and worker processes), JSON file store and memory store (tests); Drizzle schema + SQL migration for PostgreSQL. |
 | `packages/agent-orchestrator` | Lead-planner flow, coding-agent patch application under scope, verifier review, bounded repair loop. |
 | `packages/application` | Use cases: CreateRun, ApprovePlan, ApprovePullRequest, CancelRun; the durable pipeline runner. |
 | `apps/api` | Fastify REST + SSE, OpenAPI, authorization-by-repository checks on every resource. |

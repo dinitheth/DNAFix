@@ -1,6 +1,7 @@
-import { Pipeline, createDefaultDeps } from "@dnafix/application";
+import { Pipeline, createDefaultDeps, migrateLegacyStore } from "@dnafix/application";
 
 const deps = createDefaultDeps();
+await migrateLegacyStore(deps);
 const pipeline = new Pipeline(deps);
 
 /** Activity boundary: all external effects (git, DNA, model, Docker, GitHub, DB) happen here, never in workflow code. */

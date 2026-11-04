@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AuditEvent, CreateRunRequest } from "@dnafix/contracts";
 import { assertTransition, canRunInParallel, findOverlappingChanges, integrationOrder, validatePlanSemantics } from "@dnafix/domain";
 import { createCommandRunner, type CommandRunner } from "@dnafix/execution";
@@ -9,7 +10,7 @@ import { GitWorktreeManager, cloneRepository, cloneRepositoryWithToken } from "@
 import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
 import { McpConnectorService } from "@dnafix/mcp";
 import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
-import { FileStore, type RunRecord, type Store } from "@dnafix/persistence";
+import { FileStore, SqliteStore, importLegacyJson, isStaleWrite, isTerminalRunWrite, type LegacyImportReport, type RunRecord, type Store } from "@dnafix/persistence";
 import { ProjectDNAAdapter, RepositoryIntelligenceError, type RepositoryIntelligence } from "@dnafix/repository-intelligence";
 import { compareImpact, discoverChecks, evaluateVerification, runChecks } from "@dnafix/verification";
 import { codeBuildProviderFromEnv, type RemoteExecutionProvider } from "@dnafix/remote-execution";
@@ -34,11 +35,74 @@ export interface PipelineDeps {
   mcp?: McpConnectorService | null;
 }
 
+/**
+ * Repository root, derived from this package's own location. The API and the
+ * worker are started from their own package directories, so `process.cwd()`
+ * cannot anchor shared data: `.data` under one cwd and `.data` under the other
+ * are two databases, and the worker never sees the runs the API creates.
+ */
+export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+/**
+ * Where runs, worktrees and the store live. A relative DNAFIX_DATA_DIR is read
+ * against the repository root, not the cwd, so both processes agree by default.
+ */
+export function resolveDataRoot(configured = process.env.DNAFIX_DATA_DIR): string {
+  const value = configured?.trim() || ".data";
+  return path.isAbsolute(value) ? value : path.resolve(repoRoot, value);
+}
+
+/**
+ * The store the API and the worker share. SQLite is the default because both
+ * processes write the same rows: the JSON file store caches its whole database
+ * in each process, so two of them overwrite each other's runs.
+ *
+ * There is no automatic fallback. An unusable store stops startup.
+ */
+export function createStore(dataRoot: string): Store {
+  const mode = (process.env.DNAFIX_STORE?.trim() || "sqlite").toLowerCase();
+  if (mode === "file") {
+    console.warn("DNAFIX_STORE=file: the JSON store cannot be shared safely between the API and the worker. Tests and fixtures only.");
+    return new FileStore(path.join(dataRoot, "dnafix.json"));
+  }
+  if (mode !== "sqlite") throw new Error(`Unknown DNAFIX_STORE '${mode}'. Expected 'sqlite' (default) or 'file'.`);
+  const configured = process.env.DNAFIX_DATABASE_PATH?.trim();
+  // Relative to the data root, not the cwd, for the same reason as above.
+  const dbPath = configured ? (path.isAbsolute(configured) ? configured : path.join(dataRoot, configured)) : path.join(dataRoot, "dnafix.sqlite");
+  const busyTimeoutMs = Number(process.env.DNAFIX_SQLITE_BUSY_TIMEOUT_MS ?? 10_000);
+  if (!Number.isFinite(busyTimeoutMs) || busyTimeoutMs < 0) throw new Error(`DNAFIX_SQLITE_BUSY_TIMEOUT_MS must be a non-negative number, got '${process.env.DNAFIX_SQLITE_BUSY_TIMEOUT_MS}'.`);
+  return new SqliteStore(dbPath, { busyTimeoutMs });
+}
+
+/** What the running process actually stores data in, for the status surface. */
+export function describeStore(store: Store): { kind: "sqlite" | "file"; location: string } {
+  if (store instanceof SqliteStore) return { kind: "sqlite", location: store.location };
+  if (store instanceof FileStore) return { kind: "file", location: store.location };
+  return { kind: "file", location: "in-memory" };
+}
+
+/**
+ * Copies an existing .data/dnafix.json database into the active store on first
+ * run. Idempotent, so api and worker starting together is safe, and the source
+ * file is left exactly where it is.
+ */
+export async function migrateLegacyStore(deps: PipelineDeps): Promise<LegacyImportReport | null> {
+  if (!(deps.store instanceof SqliteStore)) return null;
+  const report = await importLegacyJson(path.join(deps.dataRoot, "dnafix.json"), deps.store, deps.store.location);
+  if (report) {
+    const moved = Object.entries(report.imported).filter(([, count]) => count > 0);
+    if (moved.length > 0) {
+      console.log(`Imported legacy store ${report.source} into ${report.target}: ${moved.map(([name, count]) => `${count} ${name}`).join(", ")}`);
+    }
+  }
+  return report;
+}
+
 export function createDefaultDeps(overrides: Partial<PipelineDeps> = {}): PipelineDeps {
-  const dataRoot = process.env.DNAFIX_DATA_DIR ?? path.resolve(process.cwd(), ".data");
+  const dataRoot = resolveDataRoot();
   const runner = createCommandRunner();
   const base: PipelineDeps = {
-    store: new FileStore(path.join(dataRoot, "dnafix.json")),
+    store: createStore(dataRoot),
     intelligence: new ProjectDNAAdapter(),
     model: createModelProviderFromEnv(),
     // Sub-agents (coding + verification) use Muse Spark for cost; the lead
@@ -61,8 +125,133 @@ export function createDefaultDeps(overrides: Partial<PipelineDeps> = {}): Pipeli
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${randomUUID().slice(0, 12)}`;
 
+/** Fields the store manages itself; never treated as a writer's change. */
+const STORE_MANAGED_FIELDS: (keyof RunRecord)[] = ["revision", "updatedAt"];
+const TERMINAL_STATES: RunRecord["state"][] = ["COMPLETED", "FAILED", "CANCELLED"];
+const STALE_WRITE_ATTEMPTS = 3;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Key order is stable because both sides come from the same JSON round-trip. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  } catch {
+    return false;
+  }
+}
+
+/** Another writer holds a different view of this run, so this write was dropped. */
+export class RunConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunConflictError";
+  }
+}
+
 export class RunService {
+  /** The row each writer last saw or wrote, per run, so a rejected write can be re-applied field by field. */
+  private readonly baselines = new Map<string, RunRecord>();
+
   constructor(private readonly deps: PipelineDeps) {}
+
+  /**
+   * Read a run for writing. The returned copy is tracked, so a later save that
+   * the store rejects can tell "what this writer changed" from "what drifted".
+   */
+  async load(runId: string): Promise<RunRecord | null> {
+    const run = await this.deps.store.getRun(runId);
+    if (run) {
+      this.baselines.set(runId, structuredClone(run));
+      if (TERMINAL_STATES.includes(run.state)) this.baselines.delete(runId);
+    }
+    return run;
+  }
+
+  private remember(run: RunRecord): void {
+    if (TERMINAL_STATES.includes(run.state)) this.baselines.delete(run.id);
+    else this.baselines.set(run.id, structuredClone(run));
+  }
+
+  /**
+   * Re-read the row, move only this writer's own fields onto it and retry, up to
+   * STALE_WRITE_ATTEMPTS times. Merging is safe only when the other writer left
+   * those fields alone; a field both changed is reported, never guessed. The
+   * write transaction is held only across the row update — model, test, MCP and
+   * GitHub calls all happen before it.
+   */
+  private async write(run: RunRecord): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.deps.store.saveRun(run);
+        this.remember(run);
+        return;
+      } catch (err) {
+        if (isTerminalRunWrite(err)) throw new RunConflictError((err as Error).message);
+        if (!isStaleWrite(err)) throw err;
+        const fresh = await this.deps.store.getRun(run.id);
+        if (!fresh) throw err;
+        const conflict = this.reapply(run, fresh);
+        if (conflict) {
+          // The caller's copy is now known-bad: it must re-read, and a retry with
+          // this same object reports the conflict again instead of overwriting.
+          throw new RunConflictError(conflict);
+        }
+        if (attempt >= STALE_WRITE_ATTEMPTS) throw new RunConflictError(`Run ${run.id} kept changing under this writer; the write was dropped.`);
+        await sleep(2 * attempt + Math.floor(Math.random() * 5));
+      }
+    }
+  }
+
+  /**
+   * Human cancellation wins over a running worker: re-read the row and apply only
+   * the cancellation, retrying while a mid-phase writer keeps bumping the revision,
+   * so the decision is never lost to whichever process happened to write last.
+   */
+  async cancel(runId: string): Promise<RunRecord | null> {
+    for (let attempt = 1; ; attempt++) {
+      const run = await this.load(runId);
+      if (!run) return null;
+      run.state = "CANCELLED";
+      run.updatedAt = now();
+      try {
+        await this.deps.store.saveRun(run);
+        this.remember(run);
+        return run;
+      } catch (err) {
+        // The run reached a terminal state while the cancellation was in flight;
+        // that outcome stands and is reported instead of being overwritten.
+        if (isTerminalRunWrite(err)) return this.load(runId);
+        if (!isStaleWrite(err) || attempt >= STALE_WRITE_ATTEMPTS) throw err;
+        await sleep(2 * attempt + Math.floor(Math.random() * 5));
+      }
+    }
+  }
+
+  /** Returns null when the merge is safe, otherwise a message naming the conflict. */
+  private reapply(run: RunRecord, fresh: RunRecord): string | null {
+    const baseline = this.baselines.get(run.id);
+    if (!baseline) {
+      return `Run ${run.id} was not read through this writer, so its changes cannot be merged onto the current row. Read it again and retry.`;
+    }
+    const ours: (keyof RunRecord)[] = [];
+    const shared: (keyof RunRecord)[] = [];
+    for (const key of Object.keys(run) as (keyof RunRecord)[]) {
+      if (STORE_MANAGED_FIELDS.includes(key)) continue;
+      if (sameJson(run[key], baseline[key])) continue;
+      ours.push(key);
+      if (!sameJson(fresh[key], baseline[key])) shared.push(key);
+    }
+    if (shared.length > 0) {
+      if (shared.includes("state")) return `Run ${run.id} moved to ${fresh.state} under this writer (it held ${baseline.state}); this writer's change to ${shared.join(", ")} was dropped instead of overwriting it.`;
+      return `Run ${run.id} had ${shared.map((k) => String(k)).join(", ")} changed by another writer at the same time; nothing was overwritten.`;
+    }
+    const overlay: Partial<RunRecord> = {};
+    for (const key of ours) overlay[key] = run[key] as never;
+    Object.assign(run, fresh, overlay, { revision: fresh.revision, updatedAt: now() });
+    return null;
+  }
 
   async createRun(req: CreateRunRequest, repositoryIdForPath?: string): Promise<RunRecord> {
     let repositoryPath = req.repositoryPath ?? "";
@@ -119,7 +308,7 @@ export class RunService {
       githubInstallationId: req.githubInstallationId ?? null,
       issueUrl: req.issueUrl ?? null,
     };
-    await this.deps.store.saveRun(run);
+    await this.write(run);
     await this.audit(run.id, run.repositoryId, "user", "run.created", "ok", `issue: ${req.issueTitle}`);
     return run;
   }
@@ -149,14 +338,14 @@ export class RunService {
     assertTransition(run.state, to);
     run.state = to;
     run.updatedAt = now();
-    await this.deps.store.saveRun(run);
+    await this.write(run);
     await this.audit(run.id, run.repositoryId, "system", `workflow.${to.toLowerCase()}`, "info", null);
     return run;
   }
 
   async save(run: RunRecord): Promise<void> {
     run.updatedAt = now();
-    await this.deps.store.saveRun(run);
+    await this.write(run);
   }
 }
 
@@ -257,7 +446,7 @@ export class Pipeline {
 
   private async execute(runId: string): Promise<void> {
     const { store, worktrees, intelligence, model } = this.deps;
-    const initial = await store.getRun(runId);
+    const initial = await this.runs.load(runId);
     if (!initial) return;
     let run: RunRecord = initial;
     const codingAgent = new CodingAgent(this.deps.subAgentModel ?? model);
@@ -438,7 +627,7 @@ export class Pipeline {
             await this.runs.audit(run.id, run.repositoryId, "lead-planner", "tasks.parallel", "info", batch.map((t) => t.taskId).join(" + "));
           }
           const outcomes = await Promise.all(batch.map((t) => executeOne(t.taskId)));
-          run = (await store.getRun(runId))!;
+          run = (await this.runs.load(runId))!;
           if (outcomes.includes("blocked")) {
             const failed = run.tasks.find((t) => t.status === "failed");
             run.error = `Task ${failed?.taskId} failed after ${failed?.attempts} attempt(s): ${failed?.error}`;
@@ -635,8 +824,14 @@ export class Pipeline {
         return;
       }
     } catch (err) {
-      const fresh = await store.getRun(runId);
+      const fresh = await this.runs.load(runId);
       if (!fresh || fresh.state === "CANCELLED") return;
+      if (err instanceof RunConflictError) {
+        // Another writer owns the row now (a cancel or a second worker). Stopping
+        // here is the correct outcome; overwriting it would not be.
+        await this.runs.audit(fresh.id, fresh.repositoryId, "system", "workflow.conflict", "error", err.message.slice(0, 500));
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const blocked =
         err instanceof ModelNotConfiguredError ||

@@ -240,7 +240,7 @@ Permission updates accept:
 
 ## 10. Persistence
 
-Records live in the same store as runs and integrations (JSON file locally, memory store in tests):
+Records live in the same store as runs and integrations (SQLite by default, shared with the API and worker; memory store in tests):
 
 - `mcpConnections` — one record for `docker-desktop-mcp`;
 - `mcpToolPermissions` / `mcpServerPermissions`;

@@ -1,6 +1,6 @@
 /**
  * PostgreSQL schema (Drizzle ORM) for production persistence.
- * The runnable local store is FileStore (see ./index.ts); this schema and
+ * The runnable local store is SqliteStore (see ./sqlite-store.ts); this schema and
  * migrations/0001_initial.sql define the production relational model.
  * Kept dependency-light: table definitions are expressed as SQL in the
  * migration, which is the source of truth applied by `pnpm db:migrate`.

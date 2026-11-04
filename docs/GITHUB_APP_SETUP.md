@@ -111,7 +111,7 @@ No connection is simulated. The Connect button stays disabled and no GitHub API 
 
 ### Production persistence
 
-Local development uses the atomic JSON file store under `DNAFIX_DATA_DIR`. Encrypted connections are stored in `githubConnections`. For PostgreSQL:
+Local development uses the shared SQLite store under `DNAFIX_DATA_DIR` (`dnafix.sqlite`; `DNAFIX_STORE=file` selects the older JSON store). Encrypted connections are stored in `githubConnections`. For PostgreSQL:
 
 ```bash
 pnpm db:migrate

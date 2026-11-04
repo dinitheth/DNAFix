@@ -129,6 +129,12 @@ export interface RunRecord {
   idempotency: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Optimistic concurrency token assigned by the store. A writer that read
+   * revision N may only write when the row still says N; undefined means the
+   * record has not been read from a store yet (a new run).
+   */
+  revision?: number;
   /** Provenance for an analysis seeded from a real GitHub issue (optional for historical runs). */
   githubInstallationId?: number | null;
   issueUrl?: string | null;
@@ -287,10 +293,23 @@ export class FileStore implements Store {
   private chain: Promise<void> = Promise.resolve();
   constructor(private readonly filePath: string) {}
 
+  /** Absolute path of the JSON database this store reads and writes. */
+  get location(): string {
+    return this.filePath;
+  }
+
   private async load(): Promise<DbShape> {
     if (this.db) return this.db;
+    let raw: string;
     try {
-      const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as Partial<DbShape>;
+      raw = await readFile(this.filePath, "utf8");
+    } catch {
+      // Missing file is a genuine first run; anything else is not our problem to invent.
+      this.db = emptyDb();
+      return this.db;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Partial<DbShape>;
       this.db = {
         repositories: parsed.repositories ?? [],
         runs: parsed.runs ?? [],
@@ -303,8 +322,21 @@ export class FileStore implements Store {
         mcpApprovals: parsed.mcpApprovals ?? [],
         mcpInvocations: parsed.mcpInvocations ?? [],
       };
-    } catch {
-      this.db = emptyDb();
+    } catch (err) {
+      // A half-written or hand-edited file used to be replaced by an empty
+      // database on the next write, which deleted every run silently. Keep the
+      // bytes and stop instead.
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const preserved = `${this.filePath}.corrupt-${stamp}`;
+      try {
+        await rename(this.filePath, preserved);
+      } catch {
+        // If the rename fails the original file is still in place; report either way.
+      }
+      throw new Error(
+        `${this.filePath} is not readable DNAFix data (${err instanceof Error ? err.message : String(err)}). ` +
+          `Preserved as ${preserved}; refusing to start on an empty database.`,
+      );
     }
     return this.db;
   }
@@ -444,3 +476,6 @@ export class FileStore implements Store {
     return structuredClone(filter.limit ? items.slice(0, filter.limit) : items);
   }
 }
+
+export { SqliteStore, SqliteStoreError, isStaleWrite, isTerminalRunWrite, type SqliteStoreOptions } from "./sqlite-store.js";
+export { importLegacyJson, type LegacyImportReport } from "./legacy-import.js";

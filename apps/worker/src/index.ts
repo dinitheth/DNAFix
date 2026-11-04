@@ -1,4 +1,4 @@
-import { Pipeline, createDefaultDeps } from "@dnafix/application";
+import { Pipeline, createDefaultDeps, describeStore, migrateLegacyStore } from "@dnafix/application";
 
 /**
  * Worker entrypoint.
@@ -17,8 +17,9 @@ if (process.env.WORKFLOW_ENGINE === "temporal") {
   await startTemporalWorker();
 } else {
   const deps = createDefaultDeps();
+  await migrateLegacyStore(deps);
   const pipeline = new Pipeline(deps);
-  console.log("[dnafix-worker] in-process durable engine polling for QUEUED runs (WORKFLOW_ENGINE != temporal)");
+  console.log(`[dnafix-worker] in-process durable engine polling for QUEUED runs (data root: ${deps.dataRoot}, store: ${describeStore(deps.store).location})`);
   const tick = async () => {
     const runs = await deps.store.listRuns();
     for (const run of runs) {

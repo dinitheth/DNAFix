@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveDataRoot } from "@dnafix/application";
 import { FileCleanupStore, FileLock, RoleReaper, RunRoleManager, SdkIamOperations, createAwsReaperPorts } from "@dnafix/remote-execution";
 import { IAMClient } from "@aws-sdk/client-iam";
 
@@ -16,7 +17,7 @@ export function startRoleReaperWorker(): void {
     console.log("[dnafix-reaper] disabled: AWS_ACCOUNT_ID and AWS_ARTIFACT_BUCKET are required for role reconciliation");
     return;
   }
-  const dataDir = process.env.DNAFIX_DATA_DIR ?? path.resolve(process.cwd(), ".data");
+  const dataDir = resolveDataRoot();
   const manager = new RunRoleManager(new SdkIamOperations(new IAMClient({ region })), {
     bucket,
     region,

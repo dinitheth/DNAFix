@@ -229,7 +229,7 @@ Every transition is validated (`canTransition`/`assertTransition`), persisted, a
 | `packages/verification` | Test discovery from `package.json`, baseline vs final runs, diff-vs-impact comparison | `discoverChecks`, `runChecks`, `compareImpact` |
 | `packages/agent-orchestrator` | Scope-enforced patch application (deny-by-default deletions), coding/verifier agents | `applyPatchOperations`, `CodingAgent` |
 | `packages/github` | GitHub App JWT auth, user OAuth + installation/repository/issue integration (token encryption, ETag cache, pagination), issue/PR REST adapter, webhook HMAC | `GitHubIntegrationService`, `GitHubAdapter` (draft PR only; no merge method exists) |
-| `packages/persistence` | Store port; JSON file store (dev), memory store (tests), PostgreSQL Drizzle schema + migration | `Store`, `FileStore` |
+| `packages/persistence` | Store port; SQLite store (default, shared by API and worker), JSON file store, memory store (tests), PostgreSQL Drizzle schema + migration | `Store`, `SqliteStore`, `FileStore` |
 | `packages/remote-execution` | Remote execution port + AWS CodeBuild adapter (CLI-based; no AWS SDK coupling) | `RemoteExecutionProvider`, `CodeBuildExecutionProvider` |
 
 Dependency direction is strictly inward: apps → application → domain/contracts → ports. No domain code imports Fastify, GitHub, Meta, Docker, AWS or Project DNA types.
@@ -366,7 +366,11 @@ The live gateway path is **implemented but not verified against a running Docker
 
 ## Data model and persistence
 
-The `Store` port abstracts persistence. The local default is an atomic JSON file store (single-user development); a memory store backs tests. The production relational model is defined in `packages/persistence/migrations/0001_initial.sql` (apply with `pnpm db:migrate` when `DATABASE_URL` and the `pg` driver are present) covering: users, GitHub installations, repositories, workflow runs, analysis snapshots, impact reports, implementation plans, agent tasks/sessions, tool invocations, worktrees, verification runs, pull requests, audit events and user approvals — with foreign keys, indexes, lifecycle fields and idempotency keys. The PostgreSQL adapter itself is not yet wired (see Limitations).
+The `Store` port abstracts persistence. The default is a transactional SQLite database (`node:sqlite`: WAL, `synchronous = FULL`, `BEGIN IMMEDIATE`) that the API and the worker share; a memory store backs tests, and `DNAFIX_STORE=file` selects the old JSON store for single-process fixtures. Queryable run fields live in real columns, the aggregate in `payload_json`, and `verification_checks` / `executions` are projections written in the same transaction. Schema changes are forward-only `.sql` files under `packages/persistence/migrations/sqlite/`, applied once each and recorded with a checksum; a database that fails `PRAGMA integrity_check` is quarantined with its `-wal`/`-shm` siblings instead of reset. On first SQLite start an existing `.data/dnafix.json` is imported idempotently and left untouched.
+
+Every run row carries a `revision` token: a write whose row changed underneath it is rejected, and `RunService` re-applies only the fields that writer owns or drops the write when the state machine moved. A terminal run (`COMPLETED`, `FAILED`, `CANCELLED`) can never be reopened by a stale writer.
+
+The production PostgreSQL model is defined in `packages/persistence/migrations/0001_initial.sql` (apply with `pnpm db:migrate` when `DATABASE_URL` and the `pg` driver are present), covering users, GitHub installations, repositories, workflow runs, analysis snapshots, impact reports, implementation plans, agent tasks/sessions, tool invocations, worktrees, verification runs, pull requests, audit events and user approvals — with foreign keys, indexes, lifecycle fields and idempotency keys. The PostgreSQL adapter itself is not yet wired (see Limitations).
 
 Audit events are append-only: `id, runId, repositoryId, actor (user | lead-planner | coding-agent | verification-agent | system), action, result, evidence, createdAt`. SSE progress (`GET /api/v1/runs/:id/events`) replays persisted audit events with `Last-Event-ID` reconnect support.
 
@@ -433,7 +437,10 @@ Copy `.env.example` to `.env`. No real secrets are ever committed; `.env` is git
 |---|---|---|
 | `API_PORT` | `3001` | API listen port |
 | `WEB_ORIGIN` | `http://localhost:5173` | CORS origin |
-| `DNAFIX_DATA_DIR` | `.data` | Stores, worktrees, artifacts |
+| `DNAFIX_DATA_DIR` | `.data` | Stores, worktrees, artifacts. A relative value is read against the repository root so the API and worker share it |
+| `DNAFIX_STORE` | `sqlite` | `sqlite` (shared by API + worker) or `file` (single process only) |
+| `DNAFIX_DATABASE_PATH` | `<DNAFIX_DATA_DIR>/dnafix.sqlite` | SQLite file; keep it on local disk |
+| `DNAFIX_SQLITE_BUSY_TIMEOUT_MS` | `10000` | How long a writer waits for a lock another process holds |
 | `DNAFIX_SESSION_TOKEN` | *(empty)* | Optional API bearer token (empty = local-only no-auth) |
 | `MODEL_API_KEY` | *(required for real runs)* | Meta Model API key (process env only) |
 | `MODEL_API_BASE_URL` | `https://api.meta.ai/v1` | Meta API base URL |
@@ -624,7 +631,7 @@ Useful scripts: `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm bu
 - Host-mode execution is for trusted fixture code only.
 - Single-user local auth; no multi-tenant isolation.
 - The in-process durable engine is the default; Temporal provides the production durability path but is unexercised.
-- Local persistence is a JSON file store until the PostgreSQL adapter is wired.
+- Persistence is shared SQLite by default; the PostgreSQL adapter is not wired yet and SQLite is single-host (WAL does not work on network-mounted storage).
 - Project DNA analysis is recomputed for the impact stage (snapshot reuse is a known optimization, not yet implemented).
 
 ## Roadmap

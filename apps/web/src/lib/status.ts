@@ -112,13 +112,21 @@ export function readinessItems(config: ConfigStatus): ReadinessItem[] {
           state: "Temporal",
           explanation: `Durable workflows on ${config.temporalAddress ?? "the configured Temporal server"}.`,
         }
-      : {
-          id: "workflow",
-          label: "Workflow Persistence",
-          tone: "ready",
-          state: "Durable",
-          explanation: "Every state transition is journaled to SQLite and fully resumable after process kill.",
-        },
+      : config.store?.kind === "file"
+        ? {
+            id: "workflow",
+            label: "Workflow Persistence",
+            tone: "attention",
+            state: "JSON file",
+            explanation: "Single-process store. The API and worker running together overwrite each other's runs — use the default SQLite store.",
+          }
+        : {
+            id: "workflow",
+            label: "Workflow Persistence",
+            tone: "ready",
+            state: "Durable",
+            explanation: "Every transition commits to the shared SQLite store. A run stopped mid-phase stays where it stopped; resume is not built yet.",
+          },
   );
   return items;
 }

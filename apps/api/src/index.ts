@@ -4,7 +4,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import { z } from "zod";
-import { Pipeline, RunService, createDefaultDeps } from "@dnafix/application";
+import { Pipeline, RunConflictError, RunService, createDefaultDeps, describeStore, migrateLegacyStore } from "@dnafix/application";
 import { CreateRunRequestSchema } from "@dnafix/contracts";
 import { GitHubError, GitHubIntegrationService, GitHubNotConfiguredError, verifyWebhookSignature } from "@dnafix/github";
 import { GitHubConnectionManager, readGitHubSessionId, registerGitHubRoutes } from "./github.js";
@@ -13,6 +13,7 @@ import { assertRepositoryPathAllowed, configuredRepositoryRoots, isLanBindEnable
 import { evaluateVerification } from "@dnafix/verification";
 
 const deps = createDefaultDeps();
+await migrateLegacyStore(deps);
 const runs = new RunService(deps);
 const pipeline = new Pipeline(deps);
 const app = Fastify({
@@ -32,8 +33,12 @@ app.addContentTypeParser("application/json", { parseAs: "buffer" }, (req, body, 
   rawBodies.set(req, buffer);
   try {
     done(null, buffer.length === 0 ? undefined : JSON.parse(buffer.toString("utf8")));
-  } catch (err) {
-    done(err as Error, undefined);
+  } catch {
+    // A syntax error here is the client's malformed body, not a server fault;
+    // classify it as 400 so the error handler does not report it as a 500.
+    const err = new SyntaxError("Request body is not valid JSON.") as SyntaxError & { statusCode: number };
+    err.statusCode = 400;
+    done(err, undefined);
   }
 });
 
@@ -80,8 +85,19 @@ app.setErrorHandler((error, req, reply) => {
       ...(error instanceof GitHubNotConfiguredError ? { missing: error.missing } : {}),
     });
   }
+  // A run another process moved while this request was in flight. The stored row
+  // stays as it is; the client re-reads and decides.
+  if (error instanceof RunConflictError) {
+    return reply.code(409).send({ error: error.message, code: "run_conflict" });
+  }
   if (error instanceof z.ZodError) {
     return reply.code(400).send({ error: error.issues, code: "invalid_request" });
+  }
+  // Malformed bodies and unsupported content types arrive already classified by
+  // Fastify. Reporting them as 500 hides a client mistake behind our own error.
+  const status = (error as { statusCode?: unknown }).statusCode;
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return reply.code(status).send({ error: error instanceof Error ? error.message : "Invalid request.", code: "invalid_request" });
   }
   req.log.error({ err: error }, "unhandled request error");
   return reply.code(500).send({ error: "Internal server error" });
@@ -132,6 +148,7 @@ function configStatusPayload() {
     },
     workflowEngine: process.env.WORKFLOW_ENGINE === "temporal" ? "temporal" : "in-process-durable",
     temporalAddress: process.env.TEMPORAL_ADDRESS ?? null,
+    store: describeStore(deps.store),
   };
 }
 
@@ -210,7 +227,7 @@ app.get("/api/v1/runs/:id", async (req, reply) => {
 });
 
 async function loadRun(id: string, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
-  const run = await deps.store.getRun(id);
+  const run = await runs.load(id);
   if (!run) {
     reply.code(404).send({ error: "Run not found" });
     return null;
@@ -264,10 +281,9 @@ app.post("/api/v1/runs/:id/cancel", async (req, reply) => {
   if (["COMPLETED", "FAILED", "CANCELLED"].includes(run.state)) return reply.code(409).send({ error: `Run already ${run.state}` });
   await runs.requestRemoteCancellation(run).catch(() => undefined);
   await deps.mcp?.cancelRun(run.id).catch(() => undefined);
-  run.state = "CANCELLED";
-  await runs.save(run);
+  const cancelled = await runs.cancel(run.id);
   await runs.audit(run.id, run.repositoryId, "user", "run.cancelled", "ok", null);
-  return run;
+  return cancelled;
 });
 
 app.get("/api/v1/runs/:id/diff", async (req, reply) => {
@@ -389,5 +405,5 @@ if (remote && configuredRepositoryRoots().length === 0) {
 }
 await app.listen({ port, host: bindHost });
 app.log.info(
-  `DNAFix API listening on ${bindHost}:${port} (model provider: ${deps.model.name}, sandbox: ${deps.runner.mode}, auth: ${sessionToken ? "bearer" : "loopback-only"}, repository roots: ${configuredRepositoryRoots().join(", ") || "unrestricted (loopback)"})`,
+  `DNAFix API listening on ${bindHost}:${port} (data root: ${deps.dataRoot}, store: ${describeStore(deps.store).location}, model provider: ${deps.model.name}, sandbox: ${deps.runner.mode}, auth: ${sessionToken ? "bearer" : "loopback-only"}, repository roots: ${configuredRepositoryRoots().join(", ") || "unrestricted (loopback)"})`,
 );
