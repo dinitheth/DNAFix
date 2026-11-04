@@ -5,7 +5,7 @@ import { Icon } from "../components/Icon";
 import { Button, SectionLabel, Skeleton, StatusPill } from "../components/ui";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import { api, type AuditEvent, type Run, type RunMcpView, type RunVerification, type VerificationCheckView, type VerificationWaiverView } from "../lib/api";
-import { runStages, stateLabel, stateTone, type StageStatus } from "../lib/status";
+import { formatClock, formatSpan, runAttempts, runStages, stageTimings, stateLabel, stateTone, type StageStatus } from "../lib/status";
 
 const API = "/api/v1";
 
@@ -163,8 +163,10 @@ function CheckList({ checks, waivers }: { checks: VerificationCheckView[]; waive
   );
 }
 
-function Pipeline({ run }: { run: Run }) {
+function Pipeline({ run, audit }: { run: Run; audit: AuditEvent[] }) {
   const stages = runStages(run);
+  const timings = stageTimings(audit, run);
+  const attempts = runAttempts(audit);
   const done = stages.filter((s) => s.status === "completed").length;
 
   return (
@@ -172,12 +174,14 @@ function Pipeline({ run }: { run: Run }) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <SectionLabel index="01">Pipeline</SectionLabel>
         <span className="font-mono text-[10px] uppercase leading-[14px] tracking-[0.03em] text-[#5E626E]">
-          {done}/{stages.length} stages complete
+          {done}/{stages.length} stages complete · times from audit{attempts > 1 ? ` · attempt ${attempts}` : ""}
         </span>
       </div>
       <ol className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#26282E] bg-[#26282E] md:grid-cols-3 xl:grid-cols-6">
         {stages.map((stage) => {
           const meta = STAGE[stage.status];
+          const timing = timings[stage.id];
+          const span = formatSpan(timing.durationMs);
           const active = stage.status === "running" || stage.status === "requires-approval";
           return (
             <li key={stage.id} className={`px-2 py-2 ${active ? "bg-[#1E2026]" : "bg-[#141518]"}`}>
@@ -188,6 +192,12 @@ function Pipeline({ run }: { run: Run }) {
                 </span>
               </div>
               <p className={`mt-1 font-mono text-[11px] leading-[14px] ${active ? "text-[#ECEEF0]" : "text-[#5E626E]"}`}>{meta.label}</p>
+              {timing.startedAt && (
+                <p className="mt-1 truncate font-mono text-[10px] leading-[14px] text-[#5E626E]" title={`${new Date(timing.startedAt).toLocaleString()} · ${timing.events} audit event(s)`}>
+                  {formatClock(timing.startedAt)}
+                  {span ? ` · ${span}` : active ? ` · ${stage.status === "requires-approval" ? "waiting" : "in progress"}` : ""}
+                </p>
+              )}
             </li>
           );
         })}
@@ -299,7 +309,7 @@ export function RunDetail() {
         </p>
       </header>
 
-      <Pipeline run={r} />
+      <Pipeline audit={audit.data ?? []} run={r} />
 
       {r.error && <Alert message={r.error} />}
       {actionError && <Alert message={actionError} prefix="Action failed: " />}

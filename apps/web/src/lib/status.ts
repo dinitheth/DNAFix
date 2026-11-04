@@ -1,4 +1,4 @@
-import type { ConfigStatus, Run } from "./api";
+import type { AuditEvent, ConfigStatus, Run } from "./api";
 
 export type ReadinessTone = "ready" | "attention" | "blocked" | "optional";
 
@@ -174,6 +174,118 @@ export function runStages(run: Pick<Run, "state">): Stage[] {
     if (state === "QUEUED") status = index === 0 ? "pending" : "pending";
     return { id: stage.id, label: stage.label, status };
   });
+}
+
+const STATE_TO_STAGE = new Map<string, StageId>(
+  STAGE_ORDER.flatMap((stage) => stage.states.map((state) => [state, stage.id] as [string, StageId])),
+);
+
+/**
+ * Which pipeline stage an audit action belongs to. `workflow.<state>` events
+ * are the state transitions the engine recorded; the rest are the real
+ * `runs.audit(...)` action names from packages/application and apps/api.
+ * An action we do not recognise reports no stage instead of being guessed at.
+ */
+export function stageOfAction(action: string): StageId | null {
+  if (action.startsWith("workflow.")) return STATE_TO_STAGE.get(action.slice("workflow.".length).toUpperCase()) ?? null;
+  if (action === "execution.codebuild.baseline" || action.startsWith("repository.")) return "scanning";
+  if (action === "verification.baseline") return "scanning";
+  if (action.startsWith("project-dna.")) return "dna";
+  if (action.startsWith("plan.") || action.startsWith("model.plan") || action.startsWith("clarification.")) return "planning";
+  if (action.startsWith("task.") || action.startsWith("tasks.") || action.startsWith("integration.")) return "coding";
+  if (action.startsWith("verification.") || action.startsWith("repair.") || action === "execution.codebuild.final") return "verification";
+  if (action.startsWith("pull-request.")) return "review";
+  return null;
+}
+
+const ATTEMPT_STARTS = ["run.created", "run.resumed"];
+
+/** How many times the pipeline has been started for this run, from its own audit trail. */
+export function runAttempts(audit: AuditEvent[]): number {
+  return audit.filter((e) => ATTEMPT_STARTS.includes(e.action) && !Number.isNaN(Date.parse(e.createdAt))).length;
+}
+
+/** When the current attempt began, so a blocked-and-resumed run does not report idle gaps as stage time. */
+function attemptStart(audit: AuditEvent[]): number | null {
+  const restarts = audit
+    .filter((e) => e.action === "run.resumed" || e.action === "workflow.queued")
+    .map((e) => Date.parse(e.createdAt))
+    .filter((ms) => !Number.isNaN(ms));
+  return restarts.length ? Math.max(...restarts) : null;
+}
+
+export interface StageTiming {
+  startedAt: string | null;
+  endedAt: string | null;
+  durationMs: number | null;
+  events: number;
+}
+
+const STOPPED_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
+
+/**
+ * Start, end and span of every stage in the current attempt, taken from the
+ * timestamps of the audit events that belong to it. A stage ends when a later
+ * stage records its first event after this stage's last one, so a repair loop
+ * that returns to coding keeps coding open. Stages that never ran stay null,
+ * and a stage still in progress has no end until the run stops.
+ */
+export function stageTimings(audit: AuditEvent[], run: Pick<Run, "state" | "updatedAt">): Record<StageId, StageTiming> {
+  const from = attemptStart(audit);
+  const times = new Map<StageId, number[]>();
+  for (const event of audit) {
+    const stage = stageOfAction(event.action);
+    const ms = Date.parse(event.createdAt);
+    if (!stage || Number.isNaN(ms)) continue;
+    if (from !== null && ms < from) continue;
+    const list = times.get(stage);
+    if (list) list.push(ms);
+    else times.set(stage, [ms]);
+  }
+
+  const stoppedAt = STOPPED_STATES.includes(run.state) ? Date.parse(run.updatedAt) : NaN;
+  for (const list of times.values()) list.sort((a, b) => a - b);
+  const ids = STAGE_ORDER.map((s) => s.id);
+  const result = {} as Record<StageId, StageTiming>;
+
+  ids.forEach((id, index) => {
+    const own = times.get(id) ?? [];
+    const startedMs = own[0] ?? null;
+    let endedMs: number | null = null;
+    if (startedMs !== null) {
+      const lastOwn = own[own.length - 1]!;
+      for (const later of ids.slice(index + 1)) {
+        const next = (times.get(later) ?? []).find((ms) => ms >= lastOwn);
+        if (next !== undefined && (endedMs === null || next < endedMs)) endedMs = next;
+      }
+      if (endedMs === null && !Number.isNaN(stoppedAt) && startedMs <= stoppedAt) endedMs = stoppedAt;
+    }
+    result[id] = {
+      startedAt: startedMs === null ? null : new Date(startedMs).toISOString(),
+      endedAt: endedMs === null ? null : new Date(endedMs).toISOString(),
+      durationMs: startedMs !== null && endedMs !== null && endedMs >= startedMs ? endedMs - startedMs : null,
+      events: own.length,
+    };
+  });
+  return result;
+}
+
+/** Wall-clock stamp for the dense pipeline band: `03:12:45`, never a guess. */
+export function formatClock(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+export function formatSpan(durationMs: number | null): string {
+  if (durationMs === null) return "";
+  if (durationMs < 1000) return `${durationMs}ms`;
+  const sec = Math.floor(durationMs / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ${sec % 60}s`;
+  return `${Math.floor(min / 60)}h ${min % 60}m`;
 }
 
 export function formatDuration(createdAt: string, updatedAt: string): string {
