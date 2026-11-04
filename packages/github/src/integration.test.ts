@@ -366,11 +366,11 @@ describe("issue discovery", () => {
 
 describe("installation tokens and revocation", () => {
   it("creates repository-scoped installation tokens and caches them", async () => {
-    const calls: Array<{ repositoryIds: unknown; permissions: unknown; authorization: string | null }> = [];
+    const calls: Array<{ repositoryIds: unknown; repositoryNames: unknown; permissions: unknown; authorization: string | null }> = [];
     const svc = service((url, init) => {
       if (url.pathname === "/app/installations/42/access_tokens") {
-        const body = JSON.parse(String(init.body ?? "{}")) as { repositories?: unknown; permissions?: unknown };
-        calls.push({ repositoryIds: body.repositories, permissions: body.permissions, authorization: new Headers(init.headers).get("authorization") });
+        const body = JSON.parse(String(init.body ?? "{}")) as { repository_ids?: unknown; repositories?: unknown; permissions?: unknown };
+        calls.push({ repositoryIds: body.repository_ids, repositoryNames: body.repositories, permissions: body.permissions, authorization: new Headers(init.headers).get("authorization") });
         return json({ token: `ghs_${calls.length}`, expires_at: new Date(Date.now() + 3_600_000).toISOString() });
       }
       return json({}, 404);
@@ -380,7 +380,8 @@ describe("installation tokens and revocation", () => {
     expect(first).toBe("ghs_1");
     expect(second).toBe("ghs_1");
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.repositoryIds).toEqual(["7"]);
+    expect(calls[0]?.repositoryIds).toEqual([7]);
+    expect(calls[0]?.repositoryNames).toBeUndefined();
     expect(calls[0]?.permissions).toEqual({ metadata: "read", contents: "read", issues: "read" });
     expect(calls[0]?.authorization).toMatch(/^Bearer /);
   });

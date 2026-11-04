@@ -617,7 +617,7 @@ export class GitHubIntegrationService {
       const cachedAgain = this.installationTokens.get(key);
       if (cachedAgain && cachedAgain.expiresAt - this.installationTokenRefreshMs > this.now()) return cachedAgain.token;
       const body: Record<string, unknown> = {};
-      if (options.repositoryIds?.length) body.repositories = options.repositoryIds.map(String);
+      if (options.repositoryIds?.length) body.repository_ids = options.repositoryIds;
       if (options.permissions) body.permissions = options.permissions;
       const raw = await this.requestJson(`/app/installations/${installationId}/access_tokens`, {
         method: "POST",
