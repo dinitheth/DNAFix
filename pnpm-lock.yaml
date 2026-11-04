@@ -47,6 +47,9 @@ importers:
       '@dnafix/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@dnafix/verification':
+        specifier: workspace:*
+        version: link:../../packages/verification
       '@fastify/cors':
         specifier: ^10.0.1
         version: 10.1.0
