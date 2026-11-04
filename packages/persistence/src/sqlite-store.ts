@@ -62,12 +62,40 @@ function checksumOf(sql: string): string {
   return createHash("sha256").update(sql).digest("hex");
 }
 
+/** Blocking backoff — the store opens synchronously, so startup waits in place. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Switching the journal mode is the one statement SQLite will not sit out
+ * through busy_timeout: a connection that arrives while another is still
+ * creating the file gets "database is locked" immediately. Reading the mode
+ * lets every later connection see WAL without touching the lock, so only the
+ * process that actually has to set it retries.
+ */
+function ensureWalMode(db: DatabaseSync): void {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const current = (db.prepare("PRAGMA journal_mode").get() as { journal_mode?: string } | undefined)?.journal_mode;
+    if (typeof current === "string" && current.toLowerCase() === "wal") return;
+    try {
+      db.exec("PRAGMA journal_mode = WAL");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/database is locked|SQLITE_BUSY/i.test(message)) throw err;
+      sleepSync(5 + Math.floor(Math.random() * 25));
+    }
+  }
+  throw new SqliteStoreError("Could not put the store in WAL mode: another process held the database locked through startup.", "unavailable");
+}
+
 /**
  * Filename-ordered .sql files, each applied exactly once inside its own
  * transaction and recorded in schema_migrations. An applied file whose bytes
  * later change is a hard error: editing history silently diverges the schema
- * from what the running processes were built against. Simultaneous first starts
- * of api and worker are safe because the apply step takes the write lock.
+ * from what the running processes were built against. The ledger is read inside
+ * the write lock, so two processes starting against the same fresh file cannot
+ * both decide a migration is unapplied and replay its DDL.
  */
 function applyMigrations(db: DatabaseSync): void {
   db.exec(`
@@ -78,10 +106,6 @@ function applyMigrations(db: DatabaseSync): void {
       applied_at TEXT NOT NULL
     );
   `);
-  const applied = new Map<string, string>();
-  for (const row of db.prepare("SELECT version, checksum_sha256 FROM schema_migrations").all() as Array<{ version: string; checksum_sha256: string }>) {
-    applied.set(row.version, row.checksum_sha256);
-  }
 
   if (!existsSync(MIGRATIONS_DIR)) {
     throw new SqliteStoreError(`Migration directory ${MIGRATIONS_DIR} is missing; the store cannot be initialised.`, "migration");
@@ -93,24 +117,24 @@ function applyMigrations(db: DatabaseSync): void {
   for (const file of files) {
     const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
     const checksum = checksumOf(sql);
-    const recorded = applied.get(file);
-    if (recorded) {
-      if (recorded !== checksum) {
-        throw new SqliteStoreError(
-          `Migration '${file}' changed after it was applied (recorded ${recorded.slice(0, 12)}, found ${checksum.slice(0, 12)}). Add a new migration instead of editing history.`,
-          "migration",
-        );
-      }
-      continue;
-    }
     db.exec("BEGIN IMMEDIATE");
+    let recorded: string | null | undefined;
     try {
-      db.exec(sql);
-      db.prepare("INSERT INTO schema_migrations (version, filename, checksum_sha256, applied_at) VALUES (?, ?, ?, ?)").run(file, file, checksum, new Date().toISOString());
+      recorded = (db.prepare("SELECT checksum_sha256 FROM schema_migrations WHERE version = ?").get(file) as { checksum_sha256: string } | undefined)?.checksum_sha256;
+      if (recorded === undefined) {
+        db.exec(sql);
+        db.prepare("INSERT INTO schema_migrations (version, filename, checksum_sha256, applied_at) VALUES (?, ?, ?, ?)").run(file, file, checksum, new Date().toISOString());
+      }
       db.exec("COMMIT");
     } catch (err) {
       if (db.isTransaction) db.exec("ROLLBACK");
       throw new SqliteStoreError(`Migration '${file}' failed: ${err instanceof Error ? err.message : String(err)}`, "migration");
+    }
+    if (recorded !== undefined && recorded !== checksum) {
+      throw new SqliteStoreError(
+        `Migration '${file}' changed after it was applied (recorded ${recorded.slice(0, 12)}, found ${checksum.slice(0, 12)}). Add a new migration instead of editing history.`,
+        "migration",
+      );
     }
   }
 }
@@ -182,8 +206,10 @@ export class SqliteStore implements Store {
       throw err;
     }
     try {
-      db.exec("PRAGMA journal_mode = WAL");
+      // busy_timeout first: every statement after it can wait for a lock
+      // instead of failing the startup of whichever process lost the race.
       db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 10_000))}`);
+      ensureWalMode(db);
       db.exec("PRAGMA synchronous = FULL");
       db.exec("PRAGMA foreign_keys = ON");
       if (!options.skipIntegrityCheck) {

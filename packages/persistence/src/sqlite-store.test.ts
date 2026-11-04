@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -152,6 +153,67 @@ describe("SqliteStore: migrations", () => {
     }
   });
 
+  it("applies each migration exactly once when several processes start against the same fresh file", async () => {
+    const dir = await tempDir();
+    const file = path.join(dir, "dnafix.sqlite");
+    const child = path.join(dir, "opener.mts");
+    // Each opener signals that it is loaded and then spins until the test releases
+    // them together, so all of them reach an empty migration ledger on the same tick.
+    await writeFile(
+      child,
+      `import { existsSync, writeFileSync } from "node:fs";
+import { SqliteStore } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "packages", "persistence", "src", "sqlite-store.ts")).href)};
+const dir = ${JSON.stringify(dir)};
+writeFileSync(dir + "/ready-" + process.env.DNAFIX_TEST_WRITER, String(Date.now()));
+while (!existsSync(dir + "/go")) {
+  // busy wait
+}
+const store = new SqliteStore(process.env.DNAFIX_TEST_DB!, { skipIntegrityCheck: true });
+console.log(JSON.stringify({ migrations: store.appliedMigrations }));
+store.close();
+`,
+      "utf8",
+    );
+
+    const spawnOpener = (label: string) =>
+      new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        const proc = spawn(process.execPath, ["--import", "tsx", child], {
+          cwd: repoRoot,
+          env: { ...process.env, DNAFIX_TEST_DB: file, DNAFIX_TEST_WRITER: label },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        proc.stdout.on("data", (chunk) => (stdout += chunk.toString()));
+        proc.stderr.on("data", (chunk) => (stderr += chunk.toString()));
+        proc.on("error", reject);
+        proc.on("close", (code) => resolve({ code, stdout, stderr }));
+      });
+
+    const labels = ["a", "b", "c", "d", "e", "f"];
+    const openers = labels.map(spawnOpener);
+    const releasedAt = Date.now() + 90_000;
+    while (!labels.every((label) => existsSync(path.join(dir, `ready-${label}`)))) {
+      if (Date.now() > releasedAt) throw new Error("openers never reached the barrier");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await writeFile(path.join(dir, "go"), "", "utf8");
+    const results = await Promise.all(openers);
+
+    for (const result of results) {
+      // Before the ledger was read under the write lock, the losers either replayed
+      // the DDL ("table ... already exists", "UNIQUE constraint failed") or were
+      // refused outright with "database is locked" while setting WAL.
+      expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(JSON.parse(result.stdout.trim()).migrations).toEqual(["0001_initial_schema.sql"]);
+    }
+
+    const store = closable(new SqliteStore(file));
+    expect(store.appliedMigrations).toEqual(["0001_initial_schema.sql"]);
+    const raw = closableRaw(file);
+    expect((raw.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(1);
+  }, 180_000);
+
   it("lifts queryable run fields into columns and projects checks and executions", async () => {
     const dir = await tempDir();
     const store = closable(new SqliteStore(path.join(dir, "dnafix.sqlite")));
@@ -250,11 +312,18 @@ describe("SqliteStore: concurrency", () => {
     const child = path.join(dir, "writer.mts");
     await writeFile(
       child,
-      `import { SqliteStore, SqliteStoreError } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "packages", "persistence", "src", "sqlite-store.ts")).href)};
+      `import { existsSync, writeFileSync } from "node:fs";
+import { SqliteStore, SqliteStoreError } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "packages", "persistence", "src", "sqlite-store.ts")).href)};
 const dbPath = process.env.DNAFIX_TEST_DB!;
 const label = process.env.DNAFIX_TEST_WRITER!;
 const count = Number(process.env.DNAFIX_TEST_COUNT ?? "40");
 const store = new SqliteStore(dbPath, { skipIntegrityCheck: true });
+// Line the writers up on a barrier so they hit the same row at the same moment:
+// without it the assertion below can pass a suite run where nothing collided.
+writeFileSync(${JSON.stringify(path.join(dir, "ready-"))} + label, String(Date.now()));
+while (!existsSync(${JSON.stringify(path.join(dir, "go"))})) {
+  // busy wait
+}
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let retries = 0;
 for (let i = 0; i < count; i += 1) {
@@ -324,7 +393,14 @@ store.close();
         proc.on("close", (code) => resolve({ code, stdout, stderr }));
       });
 
-    const results = await Promise.all([spawnWriter("a"), spawnWriter("b"), spawnWriter("c")]);
+    const writers = [spawnWriter("a"), spawnWriter("b"), spawnWriter("c")];
+    const releaseAfter = Date.now() + 90_000;
+    while (!["a", "b", "c"].every((label) => existsSync(path.join(dir, `ready-${label}`)))) {
+      if (Date.now() > releaseAfter) throw new Error("writers never reached the barrier");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await writeFile(path.join(dir, "go"), "", "utf8");
+    const results = await Promise.all(writers);
     for (const result of results) {
       expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/SQLITE_BUSY|database is locked/);
       expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/stale/);
