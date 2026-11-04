@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
@@ -8,14 +9,33 @@ import { CreateRunRequestSchema } from "@dnafix/contracts";
 import { GitHubError, GitHubIntegrationService, GitHubNotConfiguredError, verifyWebhookSignature } from "@dnafix/github";
 import { GitHubConnectionManager, readGitHubSessionId, registerGitHubRoutes } from "./github.js";
 import { registerMcpRoutes } from "./mcp.js";
+import { assertRepositoryPathAllowed, configuredRepositoryRoots, isLanBindEnabled, isRemoteBind, RepositoryPathError } from "./repository-policy.js";
 import { evaluateVerification } from "@dnafix/verification";
 
 const deps = createDefaultDeps();
 const runs = new RunService(deps);
 const pipeline = new Pipeline(deps);
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: { redact: ["req.headers.authorization", "req.headers.cookie", "code", "password"] },
+});
 const githubIntegration = new GitHubIntegrationService();
 const githubConnections = new GitHubConnectionManager(githubIntegration, deps.store);
+
+/**
+ * GitHub signs the exact bytes it sent, so the webhook must verify those
+ * bytes. Re-serialising the parsed body can differ from the original payload
+ * in key order or number formatting and would reject valid deliveries.
+ */
+const rawBodies = new WeakMap<object, Buffer>();
+app.addContentTypeParser("application/json", { parseAs: "buffer" }, (req, body, done) => {
+  const buffer = body as Buffer;
+  rawBodies.set(req, buffer);
+  try {
+    done(null, buffer.length === 0 ? undefined : JSON.parse(buffer.toString("utf8")));
+  } catch (err) {
+    done(err as Error, undefined);
+  }
+});
 
 await app.register(cors, { origin: process.env.WEB_ORIGIN ?? "http://localhost:5173" });
 await app.register(swagger, { openapi: { info: { title: "DNAFix API", version: "0.1.0" } } });
@@ -25,7 +45,8 @@ if (!githubIntegration.configured) {
   app.log.warn({ missing: githubIntegration.missingConfiguration }, "GitHub App user integration is not configured");
 }
 
-const sessionToken = process.env.DNAFIX_SESSION_TOKEN;
+const sessionToken = process.env.DNAFIX_SESSION_TOKEN?.trim() ?? "";
+const bearerPrefix = "Bearer ";
 app.addHook("onRequest", async (req, reply) => {
   if (!sessionToken) return;
   if (
@@ -36,10 +57,20 @@ app.addHook("onRequest", async (req, reply) => {
     req.url.startsWith("/api/v1/integrations/github/setup")
   )
     return;
-  if (req.headers.authorization !== `Bearer ${sessionToken}`) {
+  const presented = req.headers.authorization ?? "";
+  if (!matchesToken(presented, sessionToken, bearerPrefix)) {
     return reply.code(401).send({ error: "Unauthorized: missing or invalid session token" });
   }
 });
+
+/** Constant-time compare of the token after the scheme prefix, without leaking length. */
+function matchesToken(presented: string, expected: string, prefix: string): boolean {
+  if (!presented.startsWith(prefix)) return false;
+  const a = Buffer.from(presented.slice(prefix.length), "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 app.setErrorHandler((error, req, reply) => {
   if (error instanceof GitHubError) {
@@ -152,6 +183,15 @@ app.post("/api/v1/runs", async (req, reply) => {
       issueNumber: provenance.issueNumber ?? request.issueNumber,
     };
   }
+  if (request.repositoryPath !== undefined) {
+    try {
+      // Canonicalise before use: the browser never chooses where DNAFix reads.
+      request = { ...request, repositoryPath: await assertRepositoryPathAllowed(request.repositoryPath) };
+    } catch (err) {
+      if (err instanceof RepositoryPathError) return reply.code(400).send({ error: err.message, code: "repository_not_allowed" });
+      throw err;
+    }
+  }
   const run = await runs.createRun(request);
   kick(run.id);
   return reply.code(201).send(run);
@@ -173,6 +213,12 @@ async function loadRun(id: string, reply: { code: (n: number) => { send: (b: unk
   const run = await deps.store.getRun(id);
   if (!run) {
     reply.code(404).send({ error: "Run not found" });
+    return null;
+  }
+  // Every route that reaches a run goes through here, so the repository
+  // boundary is enforced once instead of only on the read endpoint.
+  if (!(await deps.store.getRepository(run.repositoryId))) {
+    reply.code(404).send({ error: "Run repository not found" });
     return null;
   }
   return run;
@@ -317,8 +363,8 @@ app.get("/api/v1/runs/:id/events", async (req, reply) => {
 
 app.post("/api/v1/webhooks/github", async (req, reply) => {
   const secret = process.env.GITHUB_WEBHOOK_SECRET ?? "";
-  const raw = typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {});
-  if (!verifyWebhookSignature(raw, req.headers["x-hub-signature-256"] as string | undefined, secret)) {
+  const raw = rawBodies.get(req as unknown as object);
+  if (!raw || !verifyWebhookSignature(raw.toString("utf8"), req.headers["x-hub-signature-256"] as string | undefined, secret)) {
     return reply.code(401).send({ error: "Invalid webhook signature" });
   }
   const event = req.headers["x-github-event"] as string;
@@ -327,5 +373,21 @@ app.post("/api/v1/webhooks/github", async (req, reply) => {
 });
 
 const port = Number(process.env.API_PORT ?? 3001);
-await app.listen({ port, host: "0.0.0.0" });
-app.log.info(`DNAFix API listening on :${port} (model provider: ${deps.model.name}, sandbox: ${deps.runner.mode})`);
+const bindHost = process.env.DNAFIX_BIND_HOST?.trim() || "127.0.0.1";
+const lanBind = isLanBindEnabled();
+const remote = isRemoteBind(bindHost);
+if (remote && !lanBind) {
+  throw new Error(
+    `Refusing to bind ${bindHost}: a non-loopback host exposes run creation, which executes repository code. Set DNAFIX_ALLOW_LAN_BIND=true to opt in.`,
+  );
+}
+if (remote && !sessionToken) {
+  throw new Error(`Refusing to bind ${bindHost} without DNAFIX_SESSION_TOKEN: an exposed API must not be unauthenticated.`);
+}
+if (remote && configuredRepositoryRoots().length === 0) {
+  throw new Error(`Refusing to bind ${bindHost} without DNAFIX_ALLOWED_REPOSITORY_ROOTS: an exposed API must constrain which repositories it may open.`);
+}
+await app.listen({ port, host: bindHost });
+app.log.info(
+  `DNAFix API listening on ${bindHost}:${port} (model provider: ${deps.model.name}, sandbox: ${deps.runner.mode}, auth: ${sessionToken ? "bearer" : "loopback-only"}, repository roots: ${configuredRepositoryRoots().join(", ") || "unrestricted (loopback)"})`,
+);
