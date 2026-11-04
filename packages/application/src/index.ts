@@ -10,7 +10,7 @@ import { GitWorktreeManager, cloneRepository, cloneRepositoryWithToken } from "@
 import { GitHubAdapter, GitHubNotConfiguredError } from "@dnafix/github";
 import { McpConnectorService } from "@dnafix/mcp";
 import { MetaModelProvider, ModelNotConfiguredError, createModelProviderFromEnv, type ModelProvider } from "@dnafix/model-provider";
-import { FileStore, SqliteStore, importLegacyJson, isStaleWrite, isTerminalRunWrite, type LegacyImportReport, type RunRecord, type Store } from "@dnafix/persistence";
+import { FileStore, SqliteStore, importLegacyJson, isStaleWrite, isTerminalRunWrite, type EffectRecord, type LegacyImportReport, type RunRecord, type Store } from "@dnafix/persistence";
 import { ProjectDNAAdapter, RepositoryIntelligenceError, type RepositoryIntelligence } from "@dnafix/repository-intelligence";
 import { compareImpact, discoverChecks, evaluateVerification, runChecks } from "@dnafix/verification";
 import { codeBuildProviderFromEnv, type RemoteExecutionProvider } from "@dnafix/remote-execution";
@@ -302,7 +302,6 @@ export class RunService {
       pullRequestNumber: null,
       error: null,
       clarificationAnswer: null,
-      idempotency: {},
       createdAt: now(),
       updatedAt: now(),
       githubInstallationId: req.githubInstallationId ?? null,
@@ -346,6 +345,36 @@ export class RunService {
   async save(run: RunRecord): Promise<void> {
     run.updatedAt = now();
     await this.write(run);
+  }
+
+  /** The journal entry this run already recorded for `key`, if any. */
+  findEffect(run: RunRecord, key: string): EffectRecord | undefined {
+    return run.effects?.find((effect) => effect.key === key);
+  }
+
+  /**
+   * Write the intent before the effect happens, so a crash between the two leaves
+   * "we asked for this" on disk instead of silence. An entry that already exists is
+   * returned untouched: a `completed` one means reuse the recorded result, a
+   * `started` one means the effect may have landed and must be reconciled first.
+   */
+  async startEffect(run: RunRecord, key: string, kind: string): Promise<EffectRecord> {
+    const existing = this.findEffect(run, key);
+    if (existing) return existing;
+    const effect: EffectRecord = { key, kind, status: "started", detail: null, startedAt: now(), completedAt: null };
+    run.effects = [...(run.effects ?? []), effect];
+    await this.save(run);
+    return effect;
+  }
+
+  /** Record the result of an effect in the same write as the fields it produced. */
+  async finishEffect(run: RunRecord, key: string, detail: string): Promise<void> {
+    const effect = this.findEffect(run, key);
+    if (!effect) throw new Error(`Run ${run.id} completed effect '${key}' without starting it.`);
+    effect.status = "completed";
+    effect.detail = detail;
+    effect.completedAt = now();
+    await this.save(run);
   }
 }
 
@@ -448,6 +477,9 @@ export class Pipeline {
     const { store, worktrees, intelligence, model } = this.deps;
     const initial = await this.runs.load(runId);
     if (!initial) return;
+    // A finished run is evidence, not work: driving it again would create worktrees,
+    // re-read GitHub and risk a second outward effect for an outcome already recorded.
+    if (TERMINAL_STATES.includes(initial.state)) return;
     let run: RunRecord = initial;
     const codingAgent = new CodingAgent(this.deps.subAgentModel ?? model);
     const verifier = new VerificationAgent(this.deps.subAgentModel ?? model);
@@ -803,10 +835,16 @@ export class Pipeline {
           return;
         }
         const branch = `dnafix/${run.id}/integration`;
+        const effectKey = "github.draft-pr";
+        // The intent is on disk before the push and the create, so a crash in this
+        // block is recorded as "we asked for a pull request" rather than as nothing.
+        await this.runs.startEffect(run, effectKey, "github.pull-request");
         const token = await this.deps.github.pushToken(installationId);
         await worktrees.pushBranchWithToken(integration.path, `https://github.com/${repo.githubOwner}/${repo.githubRepo}.git`, branch, token);
         const prBody = buildPrBody(run);
-        const pr = await this.deps.github.createDraftPullRequest({
+        // A resumed run reaches here with the intent already started and no recorded
+        // result, so GitHub is asked for the branch's PR before another one is made.
+        const pr = await this.deps.github.ensureDraftPullRequest({
           owner: repo.githubOwner,
           repo: repo.githubRepo,
           title: `[DNAFix] ${run.issueTitle}`,
@@ -817,9 +855,8 @@ export class Pipeline {
         });
         run.pullRequestUrl = pr.url;
         run.pullRequestNumber = pr.number;
-        run.idempotency["create-pr"] = pr.url;
-        await this.runs.audit(run.id, run.repositoryId, "user", "pull-request.created", "ok", pr.url);
-        await this.runs.save(run);
+        await this.runs.finishEffect(run, effectKey, pr.url);
+        await this.runs.audit(run.id, run.repositoryId, "user", pr.adopted ? "pull-request.adopted" : "pull-request.created", "ok", pr.url);
         run = await this.runs.transition(run, "COMPLETED");
         return;
       }

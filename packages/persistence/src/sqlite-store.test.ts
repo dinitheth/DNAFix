@@ -55,7 +55,7 @@ async function contractSuite(label: string, make: () => Promise<Store>) {
       await store.saveRun(run);
       const loaded = await store.getRun("run_1");
       expect(loaded?.tasks).toEqual(run.tasks);
-      expect(loaded?.idempotency).toEqual(run.idempotency);
+      expect(loaded?.effects).toEqual(run.effects);
       expect(loaded?.verificationWaivers).toEqual(run.verificationWaivers);
       expect(loaded?.state).toBe("QUEUED");
 

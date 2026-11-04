@@ -26,6 +26,16 @@ export type GitHubIssue = z.infer<typeof IssueSchema>;
 
 const PullRequestSchema = z.object({ number: z.number(), html_url: z.string(), draft: z.boolean() });
 
+const PullRequestListSchema = z.array(
+  z.object({
+    number: z.number(),
+    html_url: z.string(),
+    draft: z.boolean(),
+    head: z.object({ ref: z.string() }),
+    base: z.object({ ref: z.string() }),
+  }),
+);
+
 export interface GitHubConfig {
   appId?: string;
   privateKey?: string;
@@ -151,5 +161,51 @@ export class GitHubAdapter {
   /** Token for a single git push, used only inside the trusted control plane. Never logged. */
   async pushToken(installationId?: string | number): Promise<string> {
     return this.installationToken(installationId);
+  }
+
+  /**
+   * The open pull request whose head and base match, if GitHub already has one.
+   * Filters the open list client-side: the `head` query parameter needs the
+   * author's fork prefix, which an App-created branch does not have.
+   */
+  async findOpenPullRequest(
+    owner: string,
+    repo: string,
+    head: string,
+    base: string,
+    installationId?: string | number,
+  ): Promise<{ url: string; number: number; draft: boolean } | null> {
+    const list = PullRequestListSchema.parse(
+      await this.api("GET", `/repos/${owner}/${repo}/pulls?state=open&per_page=100`, undefined, installationId),
+    );
+    const match = list.find((pr) => pr.head.ref === head && pr.base.ref === base);
+    return match ? { url: match.html_url, number: match.number, draft: match.draft } : null;
+  }
+
+  /**
+   * Point this run at exactly one draft pull request for `head`. GitHub answers a
+   * second create with 422, and a resumed run must not invent a duplicate, so an
+   * existing PR is adopted instead — whether it was found up front or by that error.
+   */
+  async ensureDraftPullRequest(input: {
+    owner: string;
+    repo: string;
+    title: string;
+    body: string;
+    head: string;
+    base: string;
+    installationId?: string | number;
+  }): Promise<{ url: string; number: number; adopted: boolean }> {
+    const existing = await this.findOpenPullRequest(input.owner, input.repo, input.head, input.base, input.installationId);
+    if (existing) return { url: existing.url, number: existing.number, adopted: true };
+    try {
+      const pr = await this.createDraftPullRequest(input);
+      return { url: pr.url, number: pr.number, adopted: false };
+    } catch (err) {
+      if (!(err instanceof GitHubError) || err.status !== 422) throw err;
+      const raced = await this.findOpenPullRequest(input.owner, input.repo, input.head, input.base, input.installationId);
+      if (!raced) throw err;
+      return { url: raced.url, number: raced.number, adopted: true };
+    }
   }
 }

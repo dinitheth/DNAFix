@@ -48,7 +48,16 @@ export function runFixture(overrides: Partial<RunRecord> = {}): RunRecord {
     pullRequestNumber: null,
     error: null,
     clarificationAnswer: null,
-    idempotency: { "impact:abc123": "snapshot_9" },
+    effects: [
+      {
+        key: "github.draft-pr",
+        kind: "github.pull-request",
+        status: "completed",
+        detail: "https://github.com/acme/repo/pull/7",
+        startedAt: "2026-11-04T10:06:00.000Z",
+        completedAt: "2026-11-04T10:06:04.000Z",
+      },
+    ],
     createdAt: "2026-11-04T10:05:00.000Z",
     updatedAt: "2026-11-04T10:06:00.000Z",
     ...overrides,

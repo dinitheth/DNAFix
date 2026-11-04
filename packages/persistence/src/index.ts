@@ -92,6 +92,27 @@ export interface TaskRecord {
   error: string | null;
 }
 
+/**
+ * One outward-facing action taken by a run, written before it happens.
+ *
+ * `started` means "we asked for this and do not know whether it landed" — a crash
+ * between the effect and its completion is exactly the window that can duplicate a
+ * pull request or re-pay a model call. Resume must reconcile against the real world
+ * before repeating it. `completed` carries the result, so a restart reuses it instead
+ * of performing the effect again.
+ */
+export interface EffectRecord {
+  /** Stable per-run identity, e.g. `github.draft-pr`. Re-running the same key is the same intent. */
+  key: string;
+  /** What kind of effect it is, e.g. `github.pull-request`, `git.push`, `model.plan`. */
+  kind: string;
+  status: "started" | "completed";
+  /** Result of the effect (a URL, a build id, a commit sha). Never a secret. */
+  detail: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
 export interface RunRecord {
   id: string;
   repositoryId: string;
@@ -126,7 +147,11 @@ export interface RunRecord {
   pullRequestNumber: number | null;
   error: string | null;
   clarificationAnswer: string | null;
-  idempotency: Record<string, string>;
+  /**
+   * Durable journal of outward-facing effects, written before each one happens.
+   * Absent on runs recorded before the journal existed.
+   */
+  effects?: EffectRecord[];
   createdAt: string;
   updatedAt: string;
   /**
