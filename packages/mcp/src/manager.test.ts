@@ -26,7 +26,7 @@ const ROUTES: Record<string, ExecResult> = {
   "desktop version": ok("Docker Desktop 4.45.0"),
   "desktop status --format json": ok(JSON.stringify({ status: "running", engine: { running: true } })),
   "mcp version": ok("Docker MCP CLI version 0.44.1"),
-  "mcp feature ls --format json": ok(JSON.stringify([{ name: "mcp-toolkit", enabled: true }])),
+  "mcp feature ls": ok("Available experimental features:\n\n  dynamic-tools        enabled\n  tool-name-prefix     disabled\n"),
   "mcp gateway --help": ok("Usage: docker mcp gateway run"),
   "mcp profile ls --format json": ok(
     JSON.stringify({

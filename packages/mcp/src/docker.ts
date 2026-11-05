@@ -72,10 +72,15 @@ export interface DockerDesktopInfo {
   statusDetail: string;
 }
 
+export interface DockerFeature {
+  name: string;
+  enabled: boolean;
+}
+
 export interface DockerToolkitInfo {
   available: boolean;
   version: string | null;
-  enabled: boolean | null;
+  features: DockerFeature[];
   featureDetail: string;
   gatewayAvailable: boolean;
   gatewayDetail: string;
@@ -178,27 +183,20 @@ export function parseDesktopStatus(stdout: string, stderr: string): { running: b
   return { running: null, detail: text ? sanitizeText(firstLine(text), 300) : "Docker Desktop status was not reported." };
 }
 
-export function parseToolkitFeatures(stdout: string): { enabled: boolean | null; detail: string } {
-  const text = stdout.trim();
-  if (!text) return { enabled: null, detail: "Docker MCP Toolkit did not report feature state." };
-  try {
-    const parsed: unknown = JSON.parse(text);
-    const entries: Array<Record<string, unknown>> = [];
-    if (Array.isArray(parsed)) entries.push(...parsed.filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === "object"));
-    else if (parsed && typeof parsed === "object") {
-      const maybe = parsed as Record<string, unknown>;
-      const list = Array.isArray(maybe.features) ? maybe.features : Array.isArray(maybe.items) ? maybe.items : null;
-      if (list) entries.push(...list.filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === "object"));
-      else entries.push(maybe);
-    }
-    const relevant = entries.find((entry) => /mcp|toolkit/i.test(String(entry.name ?? entry.id ?? entry.feature ?? "")));
-    if (!relevant) return { enabled: null, detail: "Docker MCP feature list did not name the Toolkit feature." };
-    const raw = relevant.enabled ?? relevant.status ?? relevant.state ?? relevant.active;
-    const enabled = raw === true || (typeof raw === "string" && /^(enabled|active|on|true)$/i.test(raw));
-    return { enabled, detail: `${String(relevant.name ?? relevant.id ?? "toolkit")}: ${enabled ? "enabled" : "not enabled"}` };
-  } catch {
-    return { enabled: null, detail: "Docker MCP feature output was not valid JSON; activation state is unverified." };
+/**
+ * `docker mcp feature ls` accepts no `--format` flag; it prints rows of
+ * "<name>    enabled|disabled" under a heading, plus an "Unknown features in
+ * configuration" section whose values are not enabled/disabled. Only those rows
+ * are reported, so an unrecognised shape yields no features rather than a guess.
+ */
+export function parseToolkitFeatures(stdout: string): { features: DockerFeature[]; detail: string } {
+  const features: DockerFeature[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.trim().match(/^([a-z][a-z0-9_-]{0,63})\s+(enabled|disabled)$/i);
+    if (match?.[1] && match[2]) features.push({ name: match[1].toLowerCase(), enabled: match[2].toLowerCase() === "enabled" });
   }
+  if (features.length === 0) return { features, detail: "Docker MCP feature list reported no recognised features." };
+  return { features, detail: sanitizeText(features.map((f) => `${f.name}: ${f.enabled ? "enabled" : "disabled"}`).join(", "), 300) };
 }
 
 export function validateProfileId(value: unknown): string {
@@ -334,7 +332,7 @@ export async function detectDocker(options: DetectOptions = {}): Promise<DockerD
   let profiles: McpProfile[] | null = null;
   let profilesError: string | null = null;
   let desktop: DockerDesktopInfo = { pluginAvailable: false, pluginVersion: null, running: null, statusDetail: "" };
-  let toolkit: DockerToolkitInfo = { available: false, version: null, enabled: null, featureDetail: "", gatewayAvailable: false, gatewayDetail: "" };
+  let toolkit: DockerToolkitInfo = { available: false, version: null, features: [], featureDetail: "", gatewayAvailable: false, gatewayDetail: "" };
 
   if (!resolved.error) {
     const [versionResult, desktopVersion, desktopStatus, mcpVersion, featureResult, gatewayHelp] = await Promise.all([
@@ -342,7 +340,7 @@ export async function detectDocker(options: DetectOptions = {}): Promise<DockerD
       exec(resolved.path, ["desktop", "version"], { timeoutMs, env }),
       exec(resolved.path, ["desktop", "status", "--format", "json"], { timeoutMs, env }),
       exec(resolved.path, ["mcp", "version"], { timeoutMs, env }),
-      exec(resolved.path, ["mcp", "feature", "ls", "--format", "json"], { timeoutMs, env }),
+      exec(resolved.path, ["mcp", "feature", "ls"], { timeoutMs, env }),
       exec(resolved.path, ["mcp", "gateway", "--help"], { timeoutMs, env }),
     ]);
 
@@ -363,11 +361,11 @@ export async function detectDocker(options: DetectOptions = {}): Promise<DockerD
     };
 
     const toolkitVersion = mcpVersion.exitCode === 0 ? parseVersion(firstLine(mcpVersion.stdout)) : null;
-    const features = featureResult.exitCode === 0 ? parseToolkitFeatures(featureResult.stdout) : { enabled: null, detail: sanitizeText(firstLine(featureResult.stderr) || "Toolkit feature state was unavailable.", 300) };
+    const features = featureResult.exitCode === 0 ? parseToolkitFeatures(featureResult.stdout) : { features: [], detail: sanitizeText(firstLine(featureResult.stderr) || "Toolkit feature state was unavailable.", 300) };
     toolkit = {
       available: Boolean(toolkitVersion),
       version: toolkitVersion,
-      enabled: features.enabled,
+      features: features.features,
       featureDetail: features.detail,
       gatewayAvailable: gatewayHelp.exitCode === 0 && /gateway/i.test(`${gatewayHelp.stdout}\n${gatewayHelp.stderr}`),
       gatewayDetail: gatewayHelp.exitCode === 0 ? "Docker MCP Gateway CLI is available." : sanitizeText(firstLine(gatewayHelp.stderr) || "Docker MCP Gateway CLI help failed.", 300),

@@ -340,7 +340,7 @@ export interface McpDetection {
   toolkit: {
     available: boolean;
     version: string | null;
-    enabled: boolean | null;
+    features: Array<{ name: string; enabled: boolean }>;
     featureDetail: string;
     gatewayAvailable: boolean;
     gatewayDetail: string;

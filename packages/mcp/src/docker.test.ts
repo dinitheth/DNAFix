@@ -33,12 +33,36 @@ function routedExec(routes: Record<string, ExecResult>, calls: ExecCall[] = []):
 
 const WINDOWS_ENV: NodeJS.ProcessEnv = { DNAFIX_DOCKER_PATH: "C:\\Program Files\\Docker\\Docker\\docker.exe", PATH: "C:\\Windows" };
 
+/** Verbatim shape of `docker mcp feature ls` on Docker 29.8.2 / MCP Toolkit 0.44.1. */
+const FEATURE_OUTPUT = [
+  "Available experimental features:",
+  "",
+  "  oauth-interceptor    disabled",
+  "                       Enable GitHub OAuth flow interception for automatic authentication",
+  "",
+  "  mcp-oauth-dcr        enabled",
+  "                       Enable Dynamic Client Registration (DCR) for automatic OAuth client setup",
+  "",
+  "  dynamic-tools        enabled",
+  "                       Enable internal MCP management tools (mcp-find, mcp-add, mcp-remove)",
+  "",
+  "  tool-name-prefix     disabled",
+  "                       Prefix all tool names with server name to avoid conflicts",
+  "",
+  "  use-embeddings       disabled",
+  "                       Enable vector similarity search for find-tools (requires OPENAI_API_KEY)",
+  "",
+  "Unknown features in configuration:",
+  "  hooks                true (unknown)",
+  "",
+].join("\n");
+
 const HEALTHY_ROUTES: Record<string, ExecResult> = {
   "--version": ok("Docker version 29.8.2, build 1234"),
   "desktop version": ok("Docker Desktop 4.45.0 (build 1234)"),
   "desktop status --format json": ok(JSON.stringify({ status: "running", engine: { running: true } })),
   "mcp version": ok("Docker MCP CLI version 0.44.1"),
-  "mcp feature ls --format json": ok(JSON.stringify([{ name: "mcp-toolkit", enabled: true }])),
+  "mcp feature ls": ok(FEATURE_OUTPUT),
   "mcp gateway --help": ok("Usage: docker mcp gateway run [flags]"),
   "mcp profile ls --format json": ok(
     JSON.stringify({
@@ -100,11 +124,18 @@ describe("Docker Desktop status and feature parsing", () => {
     expect(parseDesktopStatus("", "").running).toBeNull();
   });
 
-  it("reports Toolkit activation only when Docker says so", () => {
-    expect(parseToolkitFeatures(JSON.stringify({ features: [{ name: "mcp-toolkit", enabled: true }] })).enabled).toBe(true);
-    expect(parseToolkitFeatures(JSON.stringify([{ id: "mcp", status: "disabled" }])).enabled).toBe(false);
-    expect(parseToolkitFeatures(JSON.stringify([{ name: "other", enabled: true }])).enabled).toBeNull();
-    expect(parseToolkitFeatures("not json").enabled).toBeNull();
+  it("reads the feature rows Docker prints and ignores rows it cannot classify", () => {
+    const parsed = parseToolkitFeatures(FEATURE_OUTPUT);
+    expect(parsed.features).toEqual([
+      { name: "oauth-interceptor", enabled: false },
+      { name: "mcp-oauth-dcr", enabled: true },
+      { name: "dynamic-tools", enabled: true },
+      { name: "tool-name-prefix", enabled: false },
+      { name: "use-embeddings", enabled: false },
+    ]);
+    expect(parsed.detail).toContain("tool-name-prefix: disabled");
+    expect(parseToolkitFeatures("").features).toEqual([]);
+    expect(parseToolkitFeatures("Usage:  docker mcp feature ls").features).toEqual([]);
   });
 });
 
@@ -163,10 +194,15 @@ describe("read-only Docker detection", () => {
   });
 
   it("lists real profiles when the Toolkit is reachable", async () => {
-    const exec = routedExec(HEALTHY_ROUTES);
+    const calls: ExecCall[] = [];
+    const exec = routedExec(HEALTHY_ROUTES, calls);
     const detection = await detectDocker({ exec, platform: "win32", env: WINDOWS_ENV });
     expect(detection.desktop.running).toBe(true);
-    expect(detection.toolkit).toMatchObject({ available: true, enabled: true, gatewayAvailable: true, version: "0.44.1" });
+    expect(detection.toolkit).toMatchObject({ available: true, gatewayAvailable: true, version: "0.44.1" });
+    expect(detection.toolkit.features.map((f) => f.name)).toContain("tool-name-prefix");
+    expect(detection.toolkit.featureDetail).toContain("dynamic-tools: enabled");
+    // `docker mcp feature ls` has no format flag; asking for JSON returns an error line instead of features.
+    expect(calls.map((call) => call.args.join(" "))).toContain("mcp feature ls");
     expect(detection.profiles?.map((p) => p.id)).toEqual(["dnafix-dev", "empty"]);
     expect(detection.summary).toMatch(/2 profiles/);
     expect(detection.nextAction).toBeNull();

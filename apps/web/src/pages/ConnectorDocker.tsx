@@ -93,6 +93,7 @@ export function ConnectorDocker() {
               )}
             </div>
             {view.nextAction && !connected && <p className="mt-2 text-[12px] text-[#E5A158]">{view.nextAction}</p>}
+            {!connected && <p className="mt-1 text-[12px] text-[#8A8F98]">{view.detection.summary}</p>}
             {view.lastError && !connected && <p className="mt-1 text-[12px] text-[#E5484D]">{view.lastError}</p>}
             {connected && <p className="mt-2 font-mono text-[11px] text-[#5E626E]">{view.enabledToolCount}/{view.toolCount} tools enabled · {view.serverCount} servers</p>}
           </section>
