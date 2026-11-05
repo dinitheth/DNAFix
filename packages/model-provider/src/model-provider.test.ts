@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { BudgetExceededError, BudgetedModelProvider, MetaModelProvider, ModelNotConfiguredError, ScriptedModelProvider } from "./index.js";
+import {
+  BudgetedModelProvider,
+  BudgetExceededError,
+  MetaModelProvider,
+  ModelBudget,
+  ModelNotConfiguredError,
+  ScriptedModelProvider,
+  isMeterableModel,
+  meterModel,
+  modelBudgetLimitsFromEnv,
+} from "./index.js";
 
 const patchTask = {
   id: "t1",
@@ -36,7 +46,7 @@ describe("BudgetedModelProvider", () => {
 
   it("reserves budget, applies a dynamic output cap, and prices input+output", async () => {
     const counter = { calls: 0, bodies: [] as Array<Record<string, unknown>> };
-    const budgeted = new BudgetedModelProvider(new MetaModelProvider({ apiKey: "k", fetchFn: patchFetch(counter) }), limits({ maxCostUsd: 0.05 }));
+    const budgeted = new BudgetedModelProvider(new MetaModelProvider({ apiKey: "k", fetchFn: patchFetch(counter) }), new ModelBudget(limits({ maxCostUsd: 0.05 })));
     await budgeted.generatePatch({ task: { ...patchTask }, issueTitle: "i", issueBody: "b", files: [] });
     expect(counter.calls).toBe(1);
     const cap = counter.bodies[0]?.max_output_tokens as number;
@@ -49,7 +59,7 @@ describe("BudgetedModelProvider", () => {
 
   it("refuses the request before sending when remaining budget is insufficient", async () => {
     const counter = { calls: 0, bodies: [] as Array<Record<string, unknown>> };
-    const budgeted = new BudgetedModelProvider(new MetaModelProvider({ apiKey: "k", fetchFn: patchFetch(counter) }), limits({ maxCostUsd: 0.0001 }));
+    const budgeted = new BudgetedModelProvider(new MetaModelProvider({ apiKey: "k", fetchFn: patchFetch(counter) }), new ModelBudget(limits({ maxCostUsd: 0.0001 })));
     await expect(budgeted.generatePatch({ task: { ...patchTask }, issueTitle: "i", issueBody: "b", files: [] })).rejects.toBeInstanceOf(BudgetExceededError);
     expect(counter.calls).toBe(0); // no request was sent
     expect(budgeted.budgetExceeded).toBe(true);
@@ -59,7 +69,7 @@ describe("BudgetedModelProvider", () => {
     const counter = { calls: 0, bodies: [] as Array<Record<string, unknown>> };
     const budgeted = new BudgetedModelProvider(
       new MetaModelProvider({ apiKey: "k", fetchFn: patchFetch(counter, { input_tokens: 100_000, output_tokens: 140_000, total_tokens: 240_000 }) }),
-      limits({ maxCostUsd: 3 }),
+      new ModelBudget(limits({ maxCostUsd: 3 })),
     );
     // First call consumes $3.20 (100k in @ $4/1M = $0.40 + 140k out @ $20/1M = $2.80), breaching the ceiling on measured usage.
     await budgeted.generatePatch({ task: { ...patchTask }, issueTitle: "i", issueBody: "b", files: [] }).catch(() => undefined);
@@ -74,7 +84,7 @@ describe("BudgetedModelProvider", () => {
         JSON.stringify({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [], usage: { input_tokens: 500, output_tokens: 8192, total_tokens: 8692 } }),
         { status: 200 },
       )) as typeof fetch;
-    const budgeted = new BudgetedModelProvider(new MetaModelProvider({ apiKey: "k", fetchFn }), limits());
+    const budgeted = new BudgetedModelProvider(new MetaModelProvider({ apiKey: "k", fetchFn }), new ModelBudget(limits()));
     await expect(budgeted.generatePatch({ task: { ...patchTask }, issueTitle: "i", issueBody: "b", files: [] })).rejects.toThrow(/max_output_tokens/);
     expect(budgeted.calls[0]).toMatchObject({ inputTokens: 500, outputTokens: 8192, totalTokens: 8692 });
     expect(budgeted.estimatedCostUsd()).toBeGreaterThan(0);
