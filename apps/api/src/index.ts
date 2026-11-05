@@ -9,6 +9,7 @@ import { CreateRunRequestSchema } from "@dnafix/contracts";
 import { GitHubError, GitHubIntegrationService, GitHubNotConfiguredError, verifyWebhookSignature } from "@dnafix/github";
 import { GitHubConnectionManager, readGitHubSessionId, registerGitHubRoutes } from "./github.js";
 import { registerMcpRoutes } from "./mcp.js";
+import { withCheckoutState } from "./repository-checkout.js";
 import { assertRepositoryPathAllowed, configuredRepositoryRoots, isLanBindEnabled, isRemoteBind, RepositoryPathError } from "./repository-policy.js";
 import { evaluateVerification } from "@dnafix/verification";
 
@@ -196,7 +197,7 @@ app.get("/api/v1/config/status/events", async (req, reply) => {
   });
 });
 
-app.get("/api/v1/repositories", async () => deps.store.listRepositories());
+app.get("/api/v1/repositories", async () => Promise.all((await deps.store.listRepositories()).map(withCheckoutState)));
 
 app.post("/api/v1/runs", async (req, reply) => {
   const parsed = CreateRunRequestSchema.safeParse(req.body);

@@ -8,6 +8,12 @@ import { formatAgo, repositoryLabel, stateLabel, stateTone } from "../lib/status
 
 const OUTCOMES = ["COMPLETED", "BLOCKED", "FAILED", "CANCELLED"] as const;
 
+/** Why a registered path cannot serve an analysis right now, in the host's own words. */
+const CHECKOUT_PROBLEM: Partial<Record<RepositoryRecord["checkoutState"], { tone: "danger" | "warning"; label: string; detail: string }>> = {
+  missing: { tone: "danger", label: "path missing", detail: "This path is not on the host, so a new analysis blocks at repository preparation." },
+  "no-git": { tone: "warning", label: "not a git checkout", detail: "No .git in this directory, so DNAFix cannot take a base commit." },
+};
+
 /** The newest run for this repository that carries a Project DNA report. */
 function dnaRun(runs: Run[]): Run | undefined {
   return [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).find((run) => run.intelligence);
@@ -94,6 +100,7 @@ export function Repositories() {
               Boolean(repo.lastAnalyzedCommitSha) &&
               Boolean(latest?.baseCommitSha) &&
               repo.lastAnalyzedCommitSha !== latest?.baseCommitSha;
+            const problem = CHECKOUT_PROBLEM[repo.checkoutState];
 
             return (
               <article key={repo.id} className="rounded-xl border border-[#26282E] bg-[#1A1B20] p-3">
@@ -103,6 +110,7 @@ export function Repositories() {
                     {repositoryLabel({ repositoryPath: repo.localPath ?? "" }, [repo], repo.id)}
                   </span>
                   {repo.defaultBranch && <span className="font-mono text-[10px] text-[#5E626E]">{repo.defaultBranch}</span>}
+                  {problem && <StatusPill tone={problem.tone}>{problem.label}</StatusPill>}
                   <span className="font-mono text-[10px] text-[#5E626E]" title={repo.createdAt}>
                     added {formatAgo(repo.createdAt)}
                   </span>
@@ -115,6 +123,8 @@ export function Repositories() {
                     </Link>
                   </div>
                 </div>
+
+                {problem && <p className="mt-1 text-[11px] leading-4 text-[#8A8F98]">{problem.detail}</p>}
 
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] leading-[14px] text-[#8A8F98]">
                   {counts.map(([state, count]) => (
@@ -146,7 +156,7 @@ export function Repositories() {
                   </div>
                   {!intelligence ? (
                     <p className="text-[11px] leading-4 text-[#5E626E]">
-                      No Project DNA report recorded for this repository yet. Analysis runs at the start of every analysis.
+                      No Project DNA report recorded for this repository yet. DNAFix analyses the repository at the start of every run.
                     </p>
                   ) : (
                     <>

@@ -50,6 +50,8 @@ export interface RepositoryRecord {
   lastAnalyzedCommitSha: string | null;
   /** When DNAFix first registered this repository, from the store row. */
   createdAt: string;
+  /** Whether the registered path is still a usable checkout on this host. */
+  checkoutState: "present" | "no-git" | "missing" | "not-checked-out";
   githubInstallationId?: number | null;
 }
 
