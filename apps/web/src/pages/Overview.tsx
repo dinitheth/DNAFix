@@ -140,6 +140,13 @@ export function Overview() {
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
         <div className="min-w-0 flex-1 flex-col gap-4 flex">
+          {runs.data?.length === 0 && (
+            <Link to="/setup" className="flex flex-wrap items-center gap-2 rounded-xl border border-[#26282E] bg-[#1A1B20] px-3 py-2 text-[12px] text-[#8A8F98] transition-colors hover:border-[#424652]">
+              <Icon name="rocket_launch" size={15} className="text-[#BDC2FF]" />
+              No analysis has run on this host yet.
+              <span className="font-mono text-[10px] text-[#BDC2FF]">Setup checklist →</span>
+            </Link>
+          )}
           <section className="flex flex-col">
             <div className="mb-2 flex items-center gap-2">
               <SectionLabel index="01">Needs your decision</SectionLabel>

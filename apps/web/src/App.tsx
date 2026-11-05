@@ -18,6 +18,7 @@ import { ConnectorDocker } from "./pages/ConnectorDocker";
 import { ConnectorGithub } from "./pages/ConnectorGithub";
 import { Docs } from "./pages/Docs";
 import { Repositories } from "./pages/Repositories";
+import { Onboarding } from "./pages/Onboarding";
 import { Runs } from "./pages/Runs";
 
 const TERMINAL_STATES = ["COMPLETED", "FAILED", "BLOCKED", "CANCELLED"];
@@ -30,6 +31,7 @@ const NAV: Array<{ group: string; label: string; to: string; icon: string }> = [
   { group: "Workspace", label: "Repositories", to: "/repositories", icon: "source_environment" },
   { group: "Review", label: "Approvals", to: "/approvals", icon: "pan_tool" },
   { group: "Integrations", label: "Connectors", to: "/connectors", icon: "hub" },
+  { group: "System", label: "Setup", to: "/setup", icon: "checklist" },
   { group: "System", label: "Settings", to: "/settings", icon: "settings" },
 ];
 
@@ -364,6 +366,7 @@ function Shell() {
               <Route path="/runs/:id" element={<RunDetail />} />
               <Route path="/approvals" element={<Approvals />} />
               <Route path="/repositories" element={<Repositories />} />
+              <Route path="/setup" element={<Onboarding />} />
               <Route path="/connectors" element={<Connectors />} />
               <Route path="/connectors/docker" element={<ConnectorDocker />} />
               <Route path="/connectors/github" element={<ConnectorGithub />} />
