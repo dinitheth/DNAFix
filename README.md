@@ -11,15 +11,43 @@ DNAFix transforms a GitHub issue into a verified, human-reviewable draft pull re
 | Primary intelligence | Meta **Muse Wonder** (`muse-wonder-1.0`) — lead planning, task decomposition, recovery decisions |
 | Sub-agent model | Meta **Muse Spark** (`muse-spark-1.3`) — coding and verification agents (cost-optimised, user-approved role split) |
 | Repository intelligence | **Project DNA** — deterministic architecture, dependency, risk and structural-impact analysis |
-| Backend | Node.js 22, TypeScript, Fastify, Zod, PostgreSQL (schema + migrations), Temporal (workflow definitions) |
+| Backend | Node.js 22/24, TypeScript, Fastify, Zod, SQLite shared store (PostgreSQL adapter + migrations present), in-process durable engine (Temporal optional) |
 | Frontend | React 18, Vite, TypeScript, Tailwind CSS, TanStack Query, React Router |
-| Execution | Git worktrees, validated patch operations, argv-allowlist command policy, Docker sandbox or AWS CodeBuild |
-| Status | Working end-to-end locally. See [Verification status](#verification-status) for exactly what has and has not been proven. |
+| Execution | Git worktrees, validated patch operations, argv-allowlist command policy, Docker sandbox (verified) or AWS CodeBuild |
+| Status | Verified end-to-end on a local host through the human approval gate, with a real model plan and a real failing baseline executed in the Docker sandbox. See [Verified on this host](#verified-on-this-host) and [Verification status](#verification-status). |
+
+---
+
+<a id="verified-on-this-host"></a>
+## Verified on this host — 2026-11-05
+
+Every row is reproducible with the command in the right-hand column. Nothing here is asserted without an artifact.
+
+| Claim | How to check it |
+|---|---|
+| 345 automated tests pass, 1 skipped, across 41 files | `pnpm test` |
+| Typecheck and lint clean at `--max-warnings=0` | `pnpm -w typecheck && pnpm -w lint` |
+| Deterministic repository intelligence runs on the pinned runtime | `GET /api/v1/config/status` → `projectDna` (Project DNA under Node 22.23.4) |
+| A real model produced a real plan for a real defect | run `run_5e399f44-f4c`: QUEUED → REPOSITORY_PREPARATION → BASELINE_VERIFICATION → PROJECT_DNA_ANALYSIS → IMPACT_ANALYSIS → AWAITING_PLAN_APPROVAL |
+| Verification executes tests in an isolated container, not a mock | that run's baseline check: `sandboxMode: docker`, `exitCode: 1`, 28.9 s, captured `npm run test` stdout |
+| Cost per genuine run is measured, not promised | $0.552 typical / $1.289 worst from recorded usage in `docs/evaluation/runs/pilot-*/summary.json` at $4 / $20 per 1M tokens |
+| 59 commits, 13 packages, 3 apps, ~27k lines of TypeScript | `git rev-list --count HEAD` |
+| Open defects are public | issues #2, #3, #4 |
+
+## What DNAFix refuses to do
+
+- No draft pull request, and no code change, before a human approves the plan.
+- No auto-merge, ever.
+- No reported test result it did not execute — `not-executed` is a recorded status, not a pass.
+- No invented model output: with no `MODEL_API_KEY` a run blocks at planning and says so.
+- No billable AWS provisioning without explicit approval; the Region stays ap-southeast-2.
+
 
 ---
 
 ## Table of contents
 
+- [Verified on this host](#verified-on-this-host)
 - [Why DNAFix exists](#why-dnafix-exists)
 - [System architecture](#system-architecture)
 - [How a run works](#how-a-run-works)
@@ -620,9 +648,9 @@ Useful scripts: `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm bu
 <a id="verification-status"></a>
 ## Verification status
 
-**Verified with recorded evidence**: TypeScript typecheck/lint/build clean; 46 automated tests passing (plus the real-DNA bridge test with `PROJECT_DNA_PATH` set); Muse Wonder and Muse Spark live API calls (structured planning, patch generation, verification review); a complete live issue-to-patch run with human gates; real Project DNA analysis and impact at pinned commits; offline pipeline E2E; the web UI against the live API; AWS authentication, Agent Toolkit setup, and provisioning of the approved remote-execution resources.
+**Verified with recorded evidence**: TypeScript typecheck, lint at `--max-warnings=0`, build and 345 automated tests (41 files) clean on this host; Muse Wonder and Muse Spark live API calls (structured planning, patch generation, verification review); real Project DNA analysis and impact at pinned commits under the isolated Node 22.23.4 runtime; a run driven from the web UI through REPOSITORY_PREPARATION → BASELINE_VERIFICATION → PROJECT_DNA_ANALYSIS → IMPACT_ANALYSIS → AWAITING_PLAN_APPROVAL on a real model plan (`run_5e399f44-f4c`); **Docker sandbox execution of repository tests with captured stdout and a real failing exit code** (the sandbox is the default `SANDBOX_MODE`, not a mock); the full web UI (11 pages) against the live API; the shared SQLite store across API and worker processes; GitHub App credentials resolving (`configured: true`) with per-connection state read from the live status endpoint; AWS authentication and Agent Toolkit setup, and provisioning of the approved remote-execution resources.
 
-**Implemented but not yet verified against real services**: GitHub draft-PR creation (adapter contract-tested with mocked fetch; no GitHub App credentials configured), Docker sandbox execution (daemon unavailable locally by user choice), Temporal execution (no server run yet), PostgreSQL adapter (schema/migration provided; file store is the current runtime), CodeBuild job execution (provisioned; concurrency quota is 0 with a case open).
+**Implemented but not yet verified against real services**: GitHub draft-PR creation (adapter contract-tested with mocked fetch; the App is configured but no installation has been authorized on a demo host, so runs currently end as reviewable local diffs); Temporal execution (no server run yet); the PostgreSQL adapter (schema and migrations present; SQLite is the runtime store); CodeBuild job execution (provisioned; concurrency quota is 0 with a case open); per-run cost enforcement in the shipped pipeline (the ledger is unit-tested, wiring is tracked in issue #2).
 
 ---
 
@@ -635,6 +663,9 @@ Useful scripts: `pnpm dev`, `pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm bu
 - The in-process durable engine is the default; Temporal provides the production durability path but is unexercised.
 - Persistence is shared SQLite by default; the PostgreSQL adapter is not wired yet and SQLite is single-host (WAL does not work on network-mounted storage).
 - Project DNA analysis is recomputed for the impact stage (snapshot reuse is a known optimization, not yet implemented).
+- A shipped run has no monetary ceiling yet: `BudgetedModelProvider` is tested and used by `scripts/evaluate.mts`, but the pipeline still constructs a bare provider ([issue #2](https://github.com/dinitheth/DNAFix/issues/2)).
+- Runs record which model answered, not token spend; usage and cost exist only on the evaluation record ([issue #3](https://github.com/dinitheth/DNAFix/issues/3)).
+- Repository registrations cannot be retired safely, because deleting one makes its runs unreadable ([issue #4](https://github.com/dinitheth/DNAFix/issues/4)).
 
 ## Roadmap
 

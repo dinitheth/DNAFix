@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx --env-file-if-exists=../../.env --watch src/index.ts",
-    "start": "tsx --env-file-if-exists=../../.env src/index.ts",
-    "build": "tsc --noEmit -p tsconfig.json",
+    "dev": "node init && tsx --env-file-if-exists=../../.env --watch src/index.ts",
+    "start": "node init && tsx --env-file-if-exists=../../.env src/index.ts",
+    "build": "node init && tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -22,5 +22,8 @@
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   },
-  "devDependencies": { "tsx": "^4.19.2", "typescript": "^5.7.2" }
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
 }
