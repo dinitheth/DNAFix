@@ -238,7 +238,7 @@ Dependency direction is strictly inward: apps → application → domain/contrac
 
 ## Project DNA integration
 
-Project DNA is a separate, independently maintained monorepo ([`dinitheth/Project-DNA`](https://github.com/dinitheth/Project-DNA)). DNAFix **does not** vendor it, modify it, or reimplement any of its engines (in particular, there is no second ImpactEngine). Integration is an out-of-process bridge (ADR-0002):
+Project DNA is a separate, independently maintained monorepo ([`dinitheth/Project-DNA`](https://github.com/dinitheth/Project-DNA)), present here only as the `vendor/Project-DNA` git submodule. DNAFix **copies no Project DNA source into its own packages, modifies none of it, and reimplements none of its engines** (in particular, there is no second ImpactEngine). Integration is an out-of-process bridge (ADR-0002):
 
 ```mermaid
 flowchart LR
@@ -254,10 +254,11 @@ Facts enforced by the adapter:
 - The report preserves Project DNA's own completeness flags, truncation records, bounds and warnings verbatim. If Project DNA reports incomplete results, the UI says so; DNAFix never upgrades a partial result to a "complete blast radius".
 - Model hypotheses are stored separately from deterministic facts (`source: "project-dna" | "model-hypothesis" | "diff"` on every affected path).
 - If `PROJECT_DNA_PATH` is unset or the bridge fails, the run becomes `BLOCKED` with the exact error. There is no simulated fallback analysis.
+- The bridge is spawned with the Node runtime Project DNA requires (`>=22.23.2 <23`). `PROJECT_DNA_NODE_PATH` pins that binary without downgrading the Node version DNAFix itself runs on; unset, the bridge inherits the process runtime, and `/api/v1/config/status` reports whichever one will actually be used.
 
 Two snapshots are produced per planning cycle and both are recorded: the planning-stage snapshot (full analysis) and the impact-stage snapshot (targeted `getImpact` results for model-nominated, repository-resolved targets).
 
-**Verified live**: the bridge analysed the fixture repositories at pinned commits and `getImpact("src/discount.ts")` surfaced the real dependent (`src/cart.ts`); automated in `tests/integration/project-dna-bridge.test.ts` (runs when `PROJECT_DNA_PATH` is set).
+**Verified live**: the bridge analysed the fixture repositories at pinned commits and `getImpact("src/discount.ts")` surfaced the real dependent (`src/cart.ts`); automated in `tests/integration/project-dna-bridge.test.ts`, which runs whenever a Project DNA checkout resolves and passes under both the pinned Node 22 runtime and DNAFix's own Node 24. Project DNA's own toolchain was run against the vendored checkout under the pinned runtime: `typecheck` clean, `build` clean, and `420/428` tests passing — the 8 failures are Project DNA's own release-contract and Windows-path assertions, not DNAFix integration faults.
 
 ---
 
@@ -448,7 +449,8 @@ Copy `.env.example` to `.env`. No real secrets are ever committed; `.env` is git
 | `MUSE_SPARK_MODEL` | `muse-spark-1.3` | Coding/verification sub-agent model |
 | `MODEL_TRANSPORT` | `responses` | `responses` or `chat-completions` |
 | `MUSE_REASONING_EFFORT` | *(unset)* | Optional reasoning effort |
-| `PROJECT_DNA_PATH` | *(required for analysis)* | Path to a Project DNA checkout (`pnpm install` completed under Node 22.23.2) |
+| `PROJECT_DNA_PATH` | *(defaults to `vendor/Project-DNA`)* | Path to a Project DNA checkout (`pnpm install` completed under Node 22). Unset and unresolved, analysis blocks by design |
+| `PROJECT_DNA_NODE_PATH` | *(the Node running DNAFix)* | Node binary used to spawn the Project DNA bridge. Pin it to a Node 22 runtime when DNAFix itself runs on a version Project DNA rejects |
 | `GITHUB_APP_ID`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY_BASE64` (or `GITHUB_APP_PRIVATE_KEY`), `GITHUB_APP_SLUG`, `GITHUB_TOKEN_ENCRYPTION_KEY` | *(optional)* | GitHub App user connection, repository/issue import and draft PRs — see `docs/GITHUB_APP_SETUP.md` |
 | `GITHUB_INSTALLATION_ID`, `GITHUB_WEBHOOK_SECRET` | *(optional)* | Optional legacy installation for draft-PR delivery and webhook verification |
 | `APP_BASE_URL` | `http://localhost:3001` | Public API origin used to derive OAuth callback/setup URLs |
